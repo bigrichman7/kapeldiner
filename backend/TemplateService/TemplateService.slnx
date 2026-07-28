@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TemplateService.Contracts/TemplateService.Contracts.csproj" />
+    <Project Path="src/TemplateService.Core/TemplateService.Core.csproj" />
+    <Project Path="src/TemplateService.Domain/TemplateService.Domain.csproj" />
+    <Project Path="src/TemplateService.Web/TemplateService.Web.csproj" />
+    <Project Path="src/TemplateService.Infrastructure.Postgres/TemplateService.Infrastructure.Postgres.csproj" />
+  </Folder>
+</Solution>
