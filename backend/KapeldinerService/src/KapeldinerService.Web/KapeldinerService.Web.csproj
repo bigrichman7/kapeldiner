@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../KapeldinerService.Core/KapeldinerService.Core.csproj" />
+    <ProjectReference Include="../KapeldinerService.Domain/KapeldinerService.Domain.csproj" />
+    <ProjectReference Include="../KapeldinerService.Infrastructure.Postgres/KapeldinerService.Infrastructure.Postgres.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+  </ItemGroup>
+</Project>
