@@ -1,5 +1,6 @@
 using CSharpFunctionalExtensions;
 using KapeldinerService.Domain.Common.Errors;
+using KapeldinerService.Domain.Reservations;
 
 namespace KapeldinerService.Domain.Events;
 
@@ -18,6 +19,10 @@ public sealed class EventItem
     public StatusEvent Status { get; }
 
     public DateTime CreatedAt { get; }
+
+    public ICollection<EventQuota> EventQuotas { get; } = new List<EventQuota>();
+
+    public ICollection<Reservation> Reservations { get; } = new List<Reservation>();
 
     private EventItem() { }
 

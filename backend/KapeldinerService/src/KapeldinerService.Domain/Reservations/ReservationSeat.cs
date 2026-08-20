@@ -6,17 +6,22 @@ public record ReservationSeatId(Guid Value);
 
 public class ReservationSeat
 {
-    public ReservationSeat(ReservationSeatId id, ReservationId reservationId, SeatId seatId)
+
+    public ReservationSeat() { }
+    public ReservationSeat(ReservationSeatId id, ReservationId reservationId, Seat seat)
     {
         Id = id;
         ReservationId = reservationId;
-        SeatId = seatId;
+        Seat = seat;
         ReservedAt = DateTime.UtcNow;
     }
-    public ReservationSeatId Id { get; }
-    public ReservationId ReservationId { get; }
+    public ReservationSeatId Id { get; } = null!;
+    public ReservationId ReservationId { get; } = null!;
 
-    public SeatId SeatId { get; }
+    public Seat Seat { get; set; } = null!;
 
     public DateTime ReservedAt { get; }
+
+    //Для связей EF-Core
+    public Reservation Reservation { get; } = null!;
 }
