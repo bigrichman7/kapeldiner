@@ -11,27 +11,35 @@ public class Reservation
 {
 
     private readonly List<ReservationSeat> _reservedSeats = [];
-    public Reservation(ReservationId id, EventItemId eventItemId, Guid userId, IEnumerable<SeatId> seatIds, EventQuota eventQuota)
+
+    private Reservation() { }
+    public Reservation(ReservationId id, EventItemId eventItemId, Guid userId, IEnumerable<Seat> seats, EventQuotaId eventQuotaId)
     {
         Id = id;
         EventItemId = eventItemId;
         UserId = userId;
-        EventQuotaId = eventQuota.Id;
+        EventQuotaId = eventQuotaId;
 
-        var reservedSeats = seatIds
-            .Select(seatId => new ReservationSeat(new ReservationSeatId(Guid.CreateVersion7()), Id, seatId));
+        var reservedSeats = seats
+            .Select(seat => new ReservationSeat(new ReservationSeatId(Guid.CreateVersion7()), Id, seat));
 
         _reservedSeats.AddRange(reservedSeats);
     }
 
-    public ReservationId Id { get; }
+    public ReservationId Id { get; } = null!;
     public Guid UserId { get; }
-    public EventItemId EventItemId { get; }
-    public IReadOnlyList<ReservationSeat> ReservationSeats => _reservedSeats.AsReadOnly();
+    public EventItemId EventItemId { get; } = null!;
+    public IReadOnlyList<ReservationSeat> ReservationSeats => _reservedSeats;
 
-    public EventQuotaId EventQuotaId { get; }
+    public EventQuotaId EventQuotaId { get; set; } = null!;
 
-    public static Result<Reservation, DomainError> Create(EventItemId eventItemId, Guid userId, IEnumerable<SeatId> seatIds, EventQuota eventQuota)
+    public EventQuota EventQuota { get; set; } = null!;
+
+    public EventItem EventItem { get; } = null!;
+
+
+
+    public static Result<Reservation, DomainError> Create(EventItemId eventItemId, Guid userId, IEnumerable<Seat> seats, EventQuota eventQuota)
     {
         if (eventItemId.Value == Guid.Empty)
         {
@@ -43,7 +51,7 @@ public class Reservation
             return GeneralErrors.ValueIsRequired("UserId");
         }
 
-        var listSeatIds = seatIds.ToList();
+        var listSeatIds = seats.ToList();
         if (listSeatIds == null)
         {
             return GeneralErrors.ValueIsRequired("ReservationSeatId");
@@ -54,6 +62,6 @@ public class Reservation
             return GeneralErrors.ValueIsInvalid("EventQuota");
         }
 
-        return new Reservation(new ReservationId(Guid.CreateVersion7()), eventItemId, userId, seatIds, eventQuota);
+        return new Reservation(new ReservationId(Guid.CreateVersion7()), eventItemId, userId, seats, eventQuota.Id);
     }
 }

@@ -1,6 +1,12 @@
+using KapeldinerService.Infrastructure.Postgres;
+using Microsoft.EntityFrameworkCore;
 using Scalar.AspNetCore;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("KapeldinerServiceDb");
+
+builder.Services.AddDbContext<KapeldinerServiceDbContext>(options => options.UseNpgsql(connectionString));
 
 // Нативный OpenAPI .NET 9/10
 builder.Services.AddOpenApi();

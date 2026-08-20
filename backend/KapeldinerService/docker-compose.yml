@@ -1,0 +1,17 @@
+services:
+
+  postgres:
+    container_name: kapeldiner_service_postgres
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - kapeldiner_service-postgres-data:/var/lib/postgresql/18/data
+
+volumes:
+  kapeldiner_service-postgres-data:  

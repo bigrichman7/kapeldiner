@@ -1,5 +1,6 @@
 using CSharpFunctionalExtensions;
 using KapeldinerService.Domain.Common.Errors;
+using KapeldinerService.Domain.Reservations;
 
 namespace KapeldinerService.Domain.Events;
 
@@ -20,9 +21,13 @@ public record class EventQuota
 
     public EventQuotaId Id { get; } = null!;
     public EventItemId EventItemId { get; } = null!;
+
+    public EventItem EventItem { get; set; } = null!;
     public Guid UserId { get; private set; }
     public int AvailableSeats { get; private set; }
     public int UsedSeats { get; private set; }
+
+    public Reservation? Reservation { get; set; }
 
     public static Result<EventQuota, DomainError> Create(EventItemId eventItemId, Guid userId, int availableSeats)
     {
