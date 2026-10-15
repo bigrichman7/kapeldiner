@@ -33,3 +33,10 @@ if (!app.Environment.IsProduction())
 }
 
 await app.RunAsync();
+
+public partial class Program
+{
+    protected Program()
+    {
+    }
+}

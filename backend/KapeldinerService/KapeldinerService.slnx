@@ -6,4 +6,7 @@
     <Project Path="src/KapeldinerService.Web/KapeldinerService.Web.csproj" />
     <Project Path="src/KapeldinerService.Infrastructure.Postgres/KapeldinerService.Infrastructure.Postgres.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/KapeldinerService.Tests/KapeldinerService.Tests.csproj" />
+  </Folder>
 </Solution>
