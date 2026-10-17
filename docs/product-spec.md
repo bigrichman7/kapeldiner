@@ -272,10 +272,25 @@ changing the displayed identifiers.
 
 ## Current implementation is not the contract
 
-The existing domain `Seat` validates row numbers up to 27 and seat numbers up
-to 25, and `SeatType` combines `booked`, `organization`, and `vip` in one
-enum. The workbook includes seat number 26 and the optional `12А` row, so
-those integer limits do not describe the full event-configurable layout. The
-existing domain also does not cover all confirmed quota and reservation
-requirements. These are observations about current code, not endorsements of
-its model; changing the domain model or API is out of scope for this issue.
+The backend's current endpoints, DTOs, authorization, run instructions, and
+known differences from these requirements are documented in
+[`backend/README.md`](../backend/README.md). Treat this specification as the
+confirmed product requirements, not as evidence that every behavior is
+implemented. In particular, administrator reservation, quota, and
+designation writes currently stop at the event start, although the confirmed
+requirements allow them until the event ends. Event detail edits are separate
+and can continue during an event if the start time is unchanged and the new
+end time remains in the future.
+
+The current domain `Seat` supports the `12А` row and seat numbers up to 26.
+The API's available-seat catalogue is loaded from `docs/hall-layout.json`;
+event-specific designations are stored separately from reservations. These
+implementation details do not change the confirmed shared-catalogue and
+event-specific-state requirements. Zero-capacity quota entries supplied at
+event creation are currently ignored, and user creation requires configured
+SMTP delivery of a generated permanent password. The quota update endpoint
+limits capacity to 643 seats, but initial quotas supplied during event
+creation currently have no matching maximum validation. The current
+implementation also does not provide a uniform error envelope for health-check
+output, framework model-binding failures, or unhandled exceptions. These are
+implementation observations, not approved changes to the product contract.
