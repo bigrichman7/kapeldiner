@@ -21,6 +21,7 @@ using System.Text.Encodings.Web;
 
 namespace KapeldinerService.Tests.Api;
 
+[Collection("API integration tests")]
 public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFactory>
 {
     private const string TestRoleHeader = "X-Test-Role";
