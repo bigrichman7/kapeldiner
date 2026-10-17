@@ -21,7 +21,11 @@ public class Reservation
         EventQuotaId = eventQuotaId;
 
         var reservedSeats = seats
-            .Select(seat => new ReservationSeat(new ReservationSeatId(Guid.CreateVersion7()), Id, seat));
+            .Select(seat => new ReservationSeat(
+                new ReservationSeatId(Guid.CreateVersion7()),
+                Id,
+                eventItemId,
+                seat));
 
         _reservedSeats.AddRange(reservedSeats);
     }
@@ -45,29 +49,57 @@ public class Reservation
         return initialCount - _reservedSeats.Count;
     }
 
+    public int RemoveSeatIds(IReadOnlySet<string> seatIds)
+    {
+        int initialCount = _reservedSeats.Count;
+        _reservedSeats.RemoveAll(reservationSeat => seatIds.Contains(reservationSeat.SeatId));
+        return initialCount - _reservedSeats.Count;
+    }
+
+    public void ReplaceSeats(IEnumerable<Seat> seats)
+    {
+        Dictionary<string, Seat> desiredSeats = seats.ToDictionary(seat => seat.SeatId, StringComparer.Ordinal);
+        _reservedSeats.RemoveAll(reservationSeat => !desiredSeats.ContainsKey(reservationSeat.SeatId));
+
+        HashSet<string> currentSeats = _reservedSeats
+            .Select(reservationSeat => reservationSeat.SeatId)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (Seat seat in desiredSeats.Values.Where(seat => !currentSeats.Contains(seat.SeatId)))
+        {
+            _reservedSeats.Add(new ReservationSeat(
+                new ReservationSeatId(Guid.CreateVersion7()),
+                Id,
+                EventItemId,
+                seat));
+        }
+    }
+
     public static Result<Reservation, DomainError> Create(EventItemId eventItemId, Guid userId, IEnumerable<Seat> seats, EventQuota eventQuota)
     {
-        if (eventItemId.Value == Guid.Empty)
+        if (eventItemId.Value == Guid.Empty || eventQuota.EventItemId != eventItemId)
         {
             return GeneralErrors.ValueIsRequired(nameof(eventItemId));
         }
 
-        if (userId == Guid.Empty)
+        if (userId == Guid.Empty || eventQuota.UserId != userId)
         {
             return GeneralErrors.ValueIsRequired("UserId");
         }
 
-        var listSeatIds = seats.ToList();
-        if (listSeatIds == null)
+        List<Seat> listSeatIds = seats.ToList();
+        if (listSeatIds.Count == 0)
         {
-            return GeneralErrors.ValueIsRequired("ReservationSeatId");
+            return GeneralErrors.ValueIsRequired("Seats");
         }
 
-        if (listSeatIds.ToList().Count >= eventQuota.AvailableSeats - eventQuota.UsedSeats)
+        if (listSeatIds.Select(seat => seat.SeatId).Distinct(StringComparer.Ordinal).Count() != listSeatIds.Count)
+            return GeneralErrors.ValueIsInvalid("Seats");
+
+        if (listSeatIds.Count > eventQuota.AvailableSeats - eventQuota.UsedSeats)
         {
             return GeneralErrors.ValueIsInvalid("EventQuota");
         }
 
-        return new Reservation(new ReservationId(Guid.CreateVersion7()), eventItemId, userId, seats, eventQuota.Id);
+        return new Reservation(new ReservationId(Guid.CreateVersion7()), eventItemId, userId, listSeatIds, eventQuota.Id);
     }
 }

@@ -20,6 +20,8 @@ public class KapeldinerServiceDbContext : DbContext
 
     public DbSet<EventQuota> EventQuotas => Set<EventQuota>();
 
+    public DbSet<EventSeatDesignation> EventSeatDesignations => Set<EventSeatDesignation>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(KapeldinerServiceDbContext).Assembly);
