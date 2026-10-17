@@ -62,6 +62,10 @@ approved requirements.
   user. Those reservations are attributed to the selected user and counted
   against that user's event quota; the same quota limit applies. The affected
   user sees the updated booked seats and `used_seats/available_seats` count.
+- If the administrator lowers a user's `available_seats` below the current
+  `used_seats`, the administrator must select which booked seats to cancel.
+  The system must not choose seats for cancellation automatically, and the
+  resulting `used_seats` must not exceed the new quota.
 - Before an event starts, a user may change or cancel their own reservation;
   the administrator may change or cancel any user's reservation. A whole
   selection is submitted in one request. When a user's reservation contains
@@ -139,10 +143,6 @@ allows the coordinates to be traced back to the workbook.
 3. Define the precise event start/end boundary behavior for locking changes
    and automatically transitioning to completed status; event time zone is
    confirmed as `Europe/Moscow`.
-4. Define whether a user's allocated capacity can be reduced below their
-   current `used_seats`, and what happens to their reservations if that is
-   attempted. Administrator-created bookings are assigned to a user and
-   consume that user's quota.
 
 The workbook-grid `x`/`y` values are source references for the catalogue, not
 customer-facing fields. The user-facing map needs only row labels and seat
