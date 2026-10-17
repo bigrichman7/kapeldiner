@@ -49,6 +49,45 @@ public sealed class AuthenticationTests : IClassFixture<AuthenticationApiFactory
     }
 
     [Fact]
+    public async Task UserManagementRoutesEnforceAdministratorAndAuthenticatedAccess()
+    {
+        using var anonymousRequest = new HttpRequestMessage(HttpMethod.Get, "/api/users/me");
+        using HttpResponseMessage anonymousResponse = await _client.SendAsync(anonymousRequest);
+
+        using var regularUserRequest = new HttpRequestMessage(HttpMethod.Get, "/api/admin/users");
+        regularUserRequest.Headers.Add(TestRoleHeader, "User");
+        using HttpResponseMessage regularUserResponse = await _client.SendAsync(regularUserRequest);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, regularUserResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task AdministratorCreateValidatesProfileFields()
+    {
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Get, "/api/auth/csrf");
+        tokenRequest.Headers.Add(TestRoleHeader, "Administrator");
+        using HttpResponseMessage tokenResponse = await _client.SendAsync(tokenRequest);
+        using JsonDocument tokenBody = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
+        string requestToken = tokenBody.RootElement.GetProperty("data").GetProperty("requestToken").GetString()!;
+
+        using var createRequest = new HttpRequestMessage(HttpMethod.Post, "/api/admin/users")
+        {
+            Content = JsonContent.Create(new { login = "x", email = "not-an-email", name = " " })
+        };
+        createRequest.Headers.Add(TestRoleHeader, "Administrator");
+        createRequest.Headers.Add("X-CSRF-TOKEN", requestToken);
+        using HttpResponseMessage createResponse = await _client.SendAsync(createRequest);
+        using JsonDocument body = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, createResponse.StatusCode);
+        Assert.Equal("VALIDATION_FAILED", body.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.True(body.RootElement.GetProperty("error").GetProperty("fields").TryGetProperty("login", out _));
+        Assert.True(body.RootElement.GetProperty("error").GetProperty("fields").TryGetProperty("email", out _));
+        Assert.True(body.RootElement.GetProperty("error").GetProperty("fields").TryGetProperty("name", out _));
+    }
+
+    [Fact]
     public async Task LoginRequiresCsrfToken()
     {
         using HttpResponseMessage response = await _client.PostAsJsonAsync(

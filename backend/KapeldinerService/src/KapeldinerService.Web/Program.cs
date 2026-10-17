@@ -16,6 +16,7 @@ var connectionString = builder.Configuration.GetConnectionString("KapeldinerServ
 builder.Services.AddDbContextFactory<KapeldinerServiceDbContext>(options => options.UseNpgsql(connectionString));
 
 builder.Services.AddSingleton<IPasswordHasher<AuthUser>, PasswordHasher<AuthUser>>();
+builder.Services.AddSingleton<IUserEmailSender, SmtpUserEmailSender>();
 builder.Services.AddSingleton<EfAuthenticationTicketStore>();
 builder.Services.AddHostedService<AdminBootstrapper>();
 
