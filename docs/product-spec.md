@@ -200,11 +200,11 @@ administrator must explicitly cancel those bookings first. This preserves
 confirmed reservations rather than silently cascading their deletion. Once
 the quota has no used seats, it can be deleted.
 
-For a published event's start time and before its end time, users may only
-read; reservation writes return `409 EVENT_NOT_BOOKABLE`. The administrator
-may edit the event, quotas, designations, and reservations after start and up
-to (but not including) the end time. The administrator may extend `endAt`
-while the event is running. At `endAt`, the event automatically becomes
+From a published event's start time until its end, users may only read;
+reservation writes return `409 EVENT_NOT_BOOKABLE`. The administrator may
+edit the event, quotas, designations, and reservations after start and up to
+(but not including) the end time. The administrator may extend `endAt` while
+the event is running. At `endAt`, the event automatically becomes
 `completed`; a completed event cannot be edited or booked by anyone. Automatic
 completion must be performed by a background scheduler/worker and must also
 be enforced on API reads/writes when the stored status has not yet caught up.
@@ -276,11 +276,7 @@ The backend's current endpoints, DTOs, authorization, run instructions, and
 known differences from these requirements are documented in
 [`backend/README.md`](../backend/README.md). Treat this specification as the
 confirmed product requirements, not as evidence that every behavior is
-implemented. In particular, administrator reservation, quota, and
-designation writes currently stop at the event start, although the confirmed
-requirements allow them until the event ends. Event detail edits are separate
-and can continue during an event if the start time is unchanged and the new
-end time remains in the future.
+implemented.
 
 The current domain `Seat` supports the `12А` row and seat numbers up to 26.
 The API's available-seat catalogue is loaded from `docs/hall-layout.json`;
@@ -288,9 +284,8 @@ event-specific designations are stored separately from reservations. These
 implementation details do not change the confirmed shared-catalogue and
 event-specific-state requirements. Zero-capacity quota entries supplied at
 event creation are currently ignored, and user creation requires configured
-SMTP delivery of a generated permanent password. The quota update endpoint
-limits capacity to 643 seats, but initial quotas supplied during event
-creation currently have no matching maximum validation. The current
-implementation also does not provide a uniform error envelope for health-check
+SMTP delivery of a generated permanent password. Both initial quotas and
+subsequent quota updates are limited to 643 seats. The current implementation
+also does not provide a uniform error envelope for health-check
 output, framework model-binding failures, or unhandled exceptions. These are
 implementation observations, not approved changes to the product contract.

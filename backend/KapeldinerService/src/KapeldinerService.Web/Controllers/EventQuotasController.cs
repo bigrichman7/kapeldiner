@@ -262,12 +262,11 @@ public sealed class EventQuotasController(
 
         DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
         if (eventItem.Status is StatusEvent.Completed or StatusEvent.Cancelled
-            || eventItem.StardAt <= nowUtc
             || eventItem.EndAt <= nowUtc)
         {
             return Conflict(ApiResponse.Failure<object>(
                 "EVENT_NOT_EDITABLE",
-                "Квоты нельзя изменить после начала мероприятия или после его завершения."));
+                "Квоты нельзя изменить после завершения мероприятия."));
         }
 
         return null;
