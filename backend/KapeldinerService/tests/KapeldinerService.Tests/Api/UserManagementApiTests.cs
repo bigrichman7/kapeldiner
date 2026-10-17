@@ -252,14 +252,15 @@ public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFact
 
 public sealed class UserManagementApiFactory : WebApplicationFactory<Program>
 {
-    private readonly SqliteConnection _connection =
-        new($"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+    private readonly string _connectionString = $"Data Source={Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+    private readonly SqliteConnection _keepAliveConnection;
 
     public TestUserEmailSender EmailSender { get; } = new();
 
     public UserManagementApiFactory()
     {
-        _connection.Open();
+        _keepAliveConnection = new SqliteConnection(_connectionString);
+        _keepAliveConnection.Open();
     }
 
     public async Task EnsureDatabaseCreatedAsync()
@@ -282,7 +283,8 @@ public sealed class UserManagementApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<IDbContextFactory<KapeldinerServiceDbContext>>();
             services.RemoveAll<DbContextOptions<KapeldinerServiceDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<KapeldinerServiceDbContext>>();
-            services.AddDbContextFactory<KapeldinerServiceDbContext>(options => options.UseSqlite(_connection));
+            services.AddDbContextFactory<KapeldinerServiceDbContext>(
+                options => options.UseSqlite(_connectionString));
 
             services.RemoveAll<IUserEmailSender>();
             services.AddSingleton<IUserEmailSender>(EmailSender);
@@ -302,7 +304,7 @@ public sealed class UserManagementApiFactory : WebApplicationFactory<Program>
     {
         if (disposing)
         {
-            _connection.Dispose();
+            _keepAliveConnection.Dispose();
         }
 
         base.Dispose(disposing);
