@@ -37,7 +37,13 @@ public class Reservation
 
     public EventItem EventItem { get; } = null!;
 
-
+    public int RemoveSeats(IReadOnlySet<(int RowNumber, int SeatNumber)> seats)
+    {
+        int initialCount = _reservedSeats.Count;
+        _reservedSeats.RemoveAll(reservationSeat =>
+            seats.Contains((reservationSeat.Seat.RowNumber, reservationSeat.Seat.SeatNumber)));
+        return initialCount - _reservedSeats.Count;
+    }
 
     public static Result<Reservation, DomainError> Create(EventItemId eventItemId, Guid userId, IEnumerable<Seat> seats, EventQuota eventQuota)
     {

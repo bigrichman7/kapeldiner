@@ -35,9 +35,41 @@ public record class EventQuota
             return GeneralErrors.ValueIsInvalid("EventItemId");
         if (userId == Guid.Empty)
             return GeneralErrors.ValueIsInvalid("UserId");
-        if (availableSeats <= 0)
+        if (availableSeats < 0)
             return GeneralErrors.ValueIsInvalid("AvailableSeats");
 
         return new EventQuota(new EventQuotaId(Guid.CreateVersion7()), eventItemId, userId, availableSeats, 0);
+    }
+
+    public Result<EventQuota, DomainError> UpdateAvailableSeats(int availableSeats)
+    {
+        if (availableSeats < 0)
+            return GeneralErrors.ValueIsInvalid("AvailableSeats");
+        if (availableSeats < UsedSeats)
+            return new DomainError(
+                "QUOTA_BELOW_USED_SEATS",
+                "Квота не может быть меньше числа использованных мест.",
+                ErrorType.ValidationError);
+
+        AvailableSeats = availableSeats;
+        return this;
+    }
+
+    public Result<EventQuota, DomainError> ReserveSeats(int seatCount)
+    {
+        if (seatCount <= 0 || seatCount > AvailableSeats - UsedSeats)
+            return GeneralErrors.ValueIsInvalid("SeatCount");
+
+        UsedSeats += seatCount;
+        return this;
+    }
+
+    public Result<EventQuota, DomainError> CancelSeats(int seatCount)
+    {
+        if (seatCount <= 0 || seatCount > UsedSeats)
+            return GeneralErrors.ValueIsInvalid("SeatCount");
+
+        UsedSeats -= seatCount;
+        return this;
     }
 }

@@ -72,8 +72,9 @@ approved requirements.
   no seats, delete the reservation record; create it again only when that user
   next confirms one or more seats.
 - A reservation belongs to exactly one event and that event's user quota. It
-  exists only while both the event and quota exist, and is deleted with either
-  parent. A user with no reservation has no empty reservation record.
+  exists only while both the event and quota exist. A quota cannot be deleted
+  while it has booked seats; those seats must be explicitly cancelled first.
+  A user with no reservation has no empty reservation record.
 - Reservation changes are prohibited once an event has started and for past
   events. Event status changes to completed automatically after its end time.
 - Administrators can see event statistics: seats used by each user, physical
@@ -137,7 +138,10 @@ catalogue (for example, `12А-8`).
 | `GET` | `/api/admin/events/{eventId}/statistics` | Administrator | Read event totals and per-user quota/usage statistics. |
 | `PATCH` | `/api/admin/events/{eventId}` | Administrator | Update event details, including `endAt`, or enable optional row `12А`. Allowed until the event ends; completed events are immutable. |
 | `POST` | `/api/admin/events/{eventId}/publish` | Administrator | Publish a draft event so eligible users can see it. |
+| `GET` | `/api/admin/events/{eventId}/quotas` | Administrator | List event quotas with allocated, used, and remaining seats. |
+| `GET` | `/api/admin/events/{eventId}/quotas/{userId}` | Administrator | Read one user's event quota. |
 | `PUT` | `/api/admin/events/{eventId}/quotas/{userId}` | Administrator | Add/update a user's quota, with explicit seat cancellations when lowering capacity below usage. |
+| `DELETE` | `/api/admin/events/{eventId}/quotas/{userId}` | Administrator | Delete a quota that has no booked seats. |
 | `PUT` | `/api/admin/events/{eventId}/seats/{seatId}/designation` | Administrator | Set designation to `vip`, `organization`, or `none`. |
 | `PUT` | `/api/events/{eventId}/my-reservation` | User with event quota | Replace the caller's full reserved-seat selection in one request. |
 | `DELETE` | `/api/events/{eventId}/my-reservation` | User with event quota | Cancel the caller's complete reservation in one request. |
@@ -162,7 +166,13 @@ less than current usage, `cancelSeatIds` must explicitly select that user's
 currently reserved seats to cancel so the final usage fits the new capacity.
 The quota update and selected cancellations succeed or fail together. If
 capacity is not being reduced below usage, `cancelSeatIds` may be omitted or
-empty.
+empty. A quota may be set to zero, which does not grant event visibility, and
+must be between zero and the hall's 643-seat physical capacity.
+
+Deleting a quota with booked seats is rejected with a conflict; the
+administrator must explicitly cancel those bookings first. This preserves
+confirmed reservations rather than silently cascading their deletion. Once
+the quota has no used seats, it can be deleted.
 
 For a published event's start time and before its end time, users may only
 read; reservation writes return `409 EVENT_NOT_BOOKABLE`. The administrator

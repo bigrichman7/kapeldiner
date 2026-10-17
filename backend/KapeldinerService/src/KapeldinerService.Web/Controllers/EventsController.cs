@@ -314,11 +314,18 @@ public sealed class EventsController(
     {
         EventQuotaResponse? quotaResponse = myQuota is null
             ? null
-            : new EventQuotaResponse(myQuota.AvailableSeats, myQuota.UsedSeats);
+            : new EventQuotaResponse(
+                myQuota.AvailableSeats,
+                myQuota.UsedSeats,
+                myQuota.AvailableSeats - myQuota.UsedSeats);
         EventQuotaResponse[]? quotas = includeQuotas
             ? eventItem.EventQuotas
                 .OrderBy(quota => quota.UserId)
-                .Select(quota => new EventQuotaResponse(quota.AvailableSeats, quota.UsedSeats, quota.UserId))
+                .Select(quota => new EventQuotaResponse(
+                    quota.AvailableSeats,
+                    quota.UsedSeats,
+                    quota.AvailableSeats - quota.UsedSeats,
+                    quota.UserId))
                 .ToArray()
             : null;
         return new EventResponse(
@@ -378,7 +385,11 @@ public sealed class EventsController(
         EventQuotaResponse? MyQuota,
         IReadOnlyList<EventQuotaResponse>? Quotas);
 
-    public sealed record EventQuotaResponse(int AvailableSeats, int UsedSeats, Guid? UserId = null);
+    public sealed record EventQuotaResponse(
+        int AvailableSeats,
+        int UsedSeats,
+        int RemainingSeats,
+        Guid? UserId = null);
 
     private sealed record NormalizedCreateEvent(
         string Title,
