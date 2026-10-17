@@ -22,6 +22,9 @@ public sealed class AuthController(
         Id = Guid.Empty,
         Login = "unknown",
         NormalizedLogin = "UNKNOWN",
+        Name = "unknown",
+        Email = "unknown@invalid.local",
+        NormalizedEmail = "UNKNOWN@INVALID.LOCAL",
         PasswordHash = string.Empty,
         Role = AuthRoles.User,
         CreatedAtUtc = DateTime.UnixEpoch

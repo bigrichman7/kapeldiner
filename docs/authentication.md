@@ -4,7 +4,8 @@ The API uses opaque, server-side sessions delivered in an HttpOnly cookie. The
 cookie contains only a random session identifier; the serialized authentication
 ticket is stored in PostgreSQL. Passwords use ASP.NET Core Identity's
 `PasswordHasher<AuthUser>` rather than reversible encryption or plaintext.
-There is no self-registration or user-management endpoint in this issue.
+There is no self-registration. Administrators create and manage user accounts;
+authenticated users can read and update their own profile.
 
 ## Endpoints
 
@@ -15,6 +16,40 @@ There is no self-registration or user-management endpoint in this issue.
 | `GET` | `/api/auth/session` | Authenticated | Return the current user's id, login, and role. |
 | `POST` | `/api/auth/logout` | Authenticated + CSRF token | Delete the server session and expire the cookie. |
 | `GET` | `/api/admin/session` | Administrator | Example route protected by the administrator policy. |
+| `GET` | `/api/users/me` | Authenticated | Read the current user's profile. |
+| `PUT` | `/api/users/me` | Authenticated | Update the current user's login, name, and email. |
+| `GET` | `/api/admin/users` | Administrator | List user profiles. |
+| `GET` | `/api/admin/users/{id}` | Administrator | Read a user profile. |
+| `POST` | `/api/admin/users` | Administrator | Create a user and email their generated permanent password. |
+| `PUT` | `/api/admin/users/{id}` | Administrator | Update a user's login, name, and email. |
+| `DELETE` | `/api/admin/users/{id}` | Administrator | Delete a non-administrator account and revoke its sessions. |
+
+User login and email are separately stored, normalized case-insensitively, and
+unique. New accounts always have the `User` role. The MVP has one
+administrator, so role changes are not exposed; profile requests never accept
+a role or password. A user can only access `/api/users/me`, not another
+account's identifier. Changing a login revokes that user's existing sessions;
+they must sign in with the new login.
+The migration preserves existing logins, copies them into the profile name,
+and assigns a `{login}@invalid.local` placeholder email; update that email
+before relying on account email delivery.
+
+New-account credentials are delivered using SMTP settings from
+`Email:Smtp:Host`, `Email:Smtp:Port`, `Email:Smtp:FromAddress`, optional
+`Email:Smtp:FromName`, and optional paired `Email:Smtp:UserName` /
+`Email:Smtp:Password`. SMTP STARTTLS is always required. Provide credentials
+through a deployment secret manager or User Secrets, never tracked settings.
+If SMTP is missing, creation returns `503 EMAIL_NOT_CONFIGURED`; if sending
+fails, it returns `502 EMAIL_DELIVERY_FAILED`. In either case the user insert
+is rolled back and no account is created. The generated permanent password is
+random, is stored only as an ASP.NET Core Identity password hash, and is never
+logged or returned by the API. The email sends it as plaintext, which remains
+a material account-compromise risk; use a one-time password setup link instead
+when the product requirement permits.
+SMTP delivery and PostgreSQL commit cannot be one atomic operation: in the
+rare case that the mail server accepts a message but the database commit then
+fails, the recipient may receive credentials for an account that was not
+created.
 
 For login, first fetch `/api/auth/csrf`, then send its `data.requestToken` in
 `X-CSRF-TOKEN` on the login request. After successful login, fetch a fresh CSRF
@@ -76,3 +111,8 @@ database index.
 The password field is passed directly to the password hasher and is never
 logged. Bootstrap logs report only whether an administrator account was
 created, not credentials.
+
+The bootstrap administrator starts with the placeholder profile name
+`Administrator` and email `administrator@invalid.local`; update those profile
+fields from the authenticated account before relying on email delivery for
+that account.

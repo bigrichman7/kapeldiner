@@ -64,6 +64,24 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("login");
 
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
+                        .HasColumnName("normalized_email");
+
                     b.Property<string>("NormalizedLogin")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -88,6 +106,10 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.HasIndex("NormalizedLogin")
                         .IsUnique()
                         .HasDatabaseName("ux_auth_user_normalized_login");
+
+                    b.HasIndex("NormalizedEmail")
+                        .IsUnique()
+                        .HasDatabaseName("ux_auth_user_normalized_email");
 
                     b.HasIndex("Role")
                         .IsUnique()
