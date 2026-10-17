@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using KapeldinerService.Domain.Common.Errors;
 using KapeldinerService.Domain.Events;
@@ -23,17 +24,98 @@ public sealed class EventsController(
 
     [HttpGet("admin/events")]
     [Authorize(Policy = "AdministratorOnly")]
-    public async Task<IActionResult> GetAdminEvents(CancellationToken cancellationToken)
+    public async Task<IActionResult> GetAdminEvents(
+        [FromQuery] string? period,
+        [FromQuery] string? search,
+        [FromQuery] string? status,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortOrder,
+        [FromQuery] DateTimeOffset? from,
+        [FromQuery] DateTimeOffset? to,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        CancellationToken cancellationToken)
     {
+        string normalizedPeriod = period?.Trim().ToUpperInvariant() ?? "ALL";
+        string normalizedStatus = status?.Trim().ToUpperInvariant() ?? string.Empty;
+        string normalizedSortBy = sortBy?.Trim().ToUpperInvariant() ?? "STARTAT";
+        string normalizedSortOrder = sortOrder?.Trim().ToUpperInvariant() ?? "ASC";
+        string normalizedSearch = search?.Trim() ?? string.Empty;
+        int requestedPage = page ?? 1;
+        int requestedPageSize = pageSize ?? 50;
+        var fields = new Dictionary<string, string[]>(StringComparer.Ordinal);
+
+        if (normalizedPeriod is not ("ALL" or "UPCOMING" or "PAST"))
+            fields["period"] = ["Используйте all, upcoming или past."];
+        if (normalizedStatus.Length > 0
+            && normalizedStatus is not ("DRAFT" or "PUBLISHED" or "COMPLETED" or "CANCELLED"))
+            fields["status"] = ["Используйте draft, published, completed или cancelled."];
+        if (normalizedSortBy is not ("STARTAT" or "ENDAT" or "TITLE"))
+            fields["sortBy"] = ["Используйте startAt, endAt или title."];
+        if (normalizedSortOrder is not ("ASC" or "DESC"))
+            fields["sortOrder"] = ["Используйте asc или desc."];
+        if (normalizedSearch.Length > 200)
+            fields["search"] = ["Поисковая строка не должна превышать 200 символов."];
+        if (from.HasValue && to.HasValue && from.Value > to.Value)
+            fields["to"] = ["Дата окончания фильтра не может быть раньше даты начала."];
+        if (requestedPage < 1 || requestedPageSize is < 1 or > 100
+            || (long)(requestedPage - 1) * requestedPageSize > int.MaxValue)
+            fields["page"] = ["Укажите page от 1 и pageSize от 1 до 100."];
+        if (fields.Count > 0)
+            return ValidationFailure(fields);
+
         await completionService.CompleteEndedEventsAsync(cancellationToken);
         await using KapeldinerServiceDbContext dbContext =
             await contextFactory.CreateDbContextAsync(cancellationToken);
-        EventItem[] events = await dbContext.EventItems
-            .AsNoTracking()
-            .Include(eventItem => eventItem.EventQuotas)
-            .OrderBy(eventItem => eventItem.StardAt)
-            .ToArrayAsync(cancellationToken);
         DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        IQueryable<EventItem> eventsQuery = dbContext.EventItems
+            .AsNoTracking()
+            .Where(eventItem => normalizedPeriod != "UPCOMING" || eventItem.StardAt > nowUtc)
+            .Where(eventItem => normalizedPeriod != "PAST" || eventItem.EndAt <= nowUtc);
+        if (normalizedStatus.Length > 0)
+        {
+            StatusEvent requestedStatus = normalizedStatus switch
+            {
+                "DRAFT" => StatusEvent.Draft,
+                "PUBLISHED" => StatusEvent.Published,
+                "COMPLETED" => StatusEvent.Completed,
+                "CANCELLED" => StatusEvent.Cancelled,
+                _ => throw new InvalidOperationException("Validated event status was not recognized.")
+            };
+            eventsQuery = eventsQuery.Where(eventItem => eventItem.Status == requestedStatus);
+        }
+
+        if (normalizedSearch.Length > 0)
+        {
+            eventsQuery = eventsQuery.Where(eventItem =>
+                eventItem.Title!.Contains(normalizedSearch)
+                || (eventItem.Description != null && eventItem.Description.Contains(normalizedSearch)));
+        }
+
+        if (from.HasValue)
+            eventsQuery = eventsQuery.Where(eventItem => eventItem.StardAt >= from.Value.UtcDateTime);
+        if (to.HasValue)
+            eventsQuery = eventsQuery.Where(eventItem => eventItem.StardAt <= to.Value.UtcDateTime);
+
+        int totalCount = await eventsQuery.CountAsync(cancellationToken);
+        IOrderedQueryable<EventItem> orderedEvents = (normalizedSortBy, normalizedSortOrder) switch
+        {
+            ("ENDAT", "ASC") => eventsQuery.OrderBy(eventItem => eventItem.EndAt).ThenBy(eventItem => eventItem.Id),
+            ("ENDAT", "DESC") => eventsQuery.OrderByDescending(eventItem => eventItem.EndAt).ThenBy(eventItem => eventItem.Id),
+            ("TITLE", "ASC") => eventsQuery.OrderBy(eventItem => eventItem.Title).ThenBy(eventItem => eventItem.Id),
+            ("TITLE", "DESC") => eventsQuery.OrderByDescending(eventItem => eventItem.Title).ThenBy(eventItem => eventItem.Id),
+            ("STARTAT", "DESC") => eventsQuery.OrderByDescending(eventItem => eventItem.StardAt).ThenBy(eventItem => eventItem.Id),
+            _ => eventsQuery.OrderBy(eventItem => eventItem.StardAt).ThenBy(eventItem => eventItem.Id)
+        };
+        EventItem[] events = await orderedEvents
+            .Skip((requestedPage - 1) * requestedPageSize)
+            .Take(requestedPageSize)
+            .Include(eventItem => eventItem.EventQuotas)
+            .ToArrayAsync(cancellationToken);
+
+        Response.Headers["X-Total-Count"] = totalCount.ToString(CultureInfo.InvariantCulture);
+        Response.Headers["X-Page"] = requestedPage.ToString(CultureInfo.InvariantCulture);
+        Response.Headers["X-Page-Size"] = requestedPageSize.ToString(CultureInfo.InvariantCulture);
         return Ok(ApiResponse.Ok(events.Select(eventItem => ToResponse(eventItem, nowUtc, includeQuotas: true))));
     }
 

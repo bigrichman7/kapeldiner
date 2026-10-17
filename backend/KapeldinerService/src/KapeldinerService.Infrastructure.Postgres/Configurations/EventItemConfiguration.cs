@@ -49,5 +49,8 @@ public class EventItemConfiguration : IEntityTypeConfiguration<EventItem>
             .Property(ei => ei.EnableAdditionalRow12A)
             .IsRequired()
             .HasColumnName("enable_additional_row_12a");
+
+        builder.HasIndex(ei => ei.StardAt).HasDatabaseName("ix_event_item_start_at");
+        builder.HasIndex(ei => ei.EndAt).HasDatabaseName("ix_event_item_end_at");
     }
 }
