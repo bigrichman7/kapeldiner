@@ -87,10 +87,10 @@ approved requirements.
   `18:30, 5 ноября 2026`).
 - Use one response envelope for successful and failed API responses:
   `{"success": true|false, "data": ..., "error": ...}`. On success, `error`
-  is `null`; on failure, `data` is `null` and `error` contains a stable code
-  and a human-readable message. Return appropriate HTTP status codes. Never
-  return stack traces or internal exception details to users; log technical
-  details server-side.
+  is `null`; on failure, `data` is `null` and `error` contains a stable code,
+  a human-readable message, and optional field-level validation errors. Return
+  appropriate HTTP status codes. Never return stack traces or internal
+  exception details to users; log technical details server-side.
 - API work takes priority over UI work.
 - No application or API behavior is changed by this documentation issue.
 
@@ -116,9 +116,95 @@ The API must support published-event discovery, event seat-map/state reads,
 event creation and user quota assignment, event-scoped row activation and
 seat designation, seat reservation, reservation change/cancellation, and
 administrator event statistics with the permissions and time restrictions
-above. Exact paths, HTTP methods, and detailed request/response fields are not
-specified by the confirmed requirements; do not infer them from potentially
-stale endpoint notes.
+above. The following REST-style routes and data shapes are the chosen MVP
+contract for planning. Names can be mapped to the repository's implementation
+conventions without changing the documented behavior.
+
+### MVP routes and methods
+
+All IDs in paths are opaque IDs. `{seatId}` identifies one seat from the shared
+catalogue (for example, `12А-8`).
+
+| Method | Route | Access | Purpose |
+|---|---|---|---|
+| `POST` | `/api/admin/users` | Administrator | Create a user with a distinct `login`, `email`, and `name`. |
+| `GET` | `/api/events` | User | List published events where the current user has positive quota; include that user's quota. |
+| `GET` | `/api/events/{eventId}` | User with event quota; administrator | Read event details visible to the caller. |
+| `GET` | `/api/events/{eventId}/seats` | User with event quota | Read seat row/number and caller-safe `available`/`unavailable` state. |
+| `GET` | `/api/admin/events` | Administrator | List and inspect events, including draft and completed events. |
+| `POST` | `/api/admin/events` | Administrator | Create an event and assign initial user quotas in the same request. |
+| `GET` | `/api/admin/events/{eventId}/seats` | Administrator | Read seats with designation, occupancy, and occupying user details. |
+| `GET` | `/api/admin/events/{eventId}/statistics` | Administrator | Read event totals and per-user quota/usage statistics. |
+| `PATCH` | `/api/admin/events/{eventId}` | Administrator | Update event details, including `endAt`, or enable optional row `12А`. Allowed until the event ends; completed events are immutable. |
+| `POST` | `/api/admin/events/{eventId}/publish` | Administrator | Publish a draft event so eligible users can see it. |
+| `PUT` | `/api/admin/events/{eventId}/quotas/{userId}` | Administrator | Add/update a user's quota, with explicit seat cancellations when lowering capacity below usage. |
+| `PUT` | `/api/admin/events/{eventId}/seats/{seatId}/designation` | Administrator | Set designation to `vip`, `organization`, or `none`. |
+| `PUT` | `/api/events/{eventId}/my-reservation` | User with event quota | Replace the caller's full reserved-seat selection in one request. |
+| `DELETE` | `/api/events/{eventId}/my-reservation` | User with event quota | Cancel the caller's complete reservation in one request. |
+| `PUT` | `/api/admin/events/{eventId}/quotas/{userId}/reservation` | Administrator | Replace the selected user's full reserved-seat selection in one request. |
+| `DELETE` | `/api/admin/events/{eventId}/quotas/{userId}/reservation` | Administrator | Cancel the selected user's complete reservation in one request. |
+
+`POST /api/admin/events` accepts `title`, optional `description`, `startAt`,
+`endAt`, optional `enableAdditionalRow12A`, and `quotas: [{userId,
+availableSeats}]`. Quota assignment for users added later uses the quota
+endpoint. A zero quota does not make an event visible to that user.
+
+`PUT .../my-reservation` and the administrator counterpart accept
+`{"seatIds": ["..."]}`. The array is the complete desired selection, not a
+delta: adding, replacing, or removing selected seats is atomic. An empty array
+has the same effect as cancellation. A reservation record exists only while
+the selection is non-empty. A request that changes no seats may return success
+without changing quota usage.
+
+The quota endpoint accepts
+`{"availableSeats": 5, "cancelSeatIds": ["..."]}`. If the new capacity is
+less than current usage, `cancelSeatIds` must explicitly select that user's
+currently reserved seats to cancel so the final usage fits the new capacity.
+The quota update and selected cancellations succeed or fail together. If
+capacity is not being reduced below usage, `cancelSeatIds` may be omitted or
+empty.
+
+For a published event's start time and before its end time, users may only
+read; reservation writes return `409 EVENT_NOT_BOOKABLE`. The administrator
+may edit the event, quotas, designations, and reservations after start and up
+to (but not including) the end time. The administrator may extend `endAt`
+while the event is running. At `endAt`, the event automatically becomes
+`completed`; a completed event cannot be edited or booked by anyone. Automatic
+completion must be performed by a background scheduler/worker and must also
+be enforced on API reads/writes when the stored status has not yet caught up.
+The event time and boundary are interpreted in `Europe/Moscow`.
+
+### Validation, concurrency, and response contract
+
+- Trim required string inputs and reject empty values. Use basic size limits:
+  user `name` 1–100 characters, event `title` 1–200, `login` 3–50, and
+  `email` at most 254. Validate email with a conventional email-format check;
+  login must be unique and contain only letters, digits, `.`, `_`, or `-`.
+  Optional `description` is limited to 2,000 characters.
+- `startAt` and `endAt` are required valid timestamps; `endAt` must be later
+  than `startAt`. Quota and seat selections must be non-negative/valid,
+  duplicate seat IDs in one request are invalid, and referenced users,
+  events, and seats must exist.
+- Seat acquisition is atomic. The request that first commits a seat in the
+  database succeeds; a concurrent request for the same seat fails with
+  `409 SEAT_ALREADY_BOOKED`. The losing client refreshes the event seat map.
+  Validate and commit the complete seat selection and quota usage in one
+  transaction so a partially applied request cannot occur.
+- A designation cannot be assigned to a seat that is already reserved;
+  reservation and designation changes must be atomic to prevent conflicts.
+- Successful responses use HTTP `2xx` and the same envelope, e.g.
+  `{"success":true,"data":{"eventId":"..."},"error":null}`. Errors use the
+  appropriate non-2xx status and envelope, e.g.
+  `{"success":false,"data":null,"error":{"code":"SEAT_ALREADY_BOOKED","message":"Место уже занято. Обновите схему зала.","fields":null}}`.
+- Use `400` for malformed/invalid input, `401` for unauthenticated callers,
+  `403` for insufficient role/permission, `404` for missing or invisible
+  resources, `409` for conflicts (including an occupied seat), and `500` for
+  unexpected server failures. For field validation errors, `error.fields` is
+  an optional map from field name to a list of human-readable messages.
+- Keep response envelopes and field naming consistent across endpoints.
+  Return only human-readable error messages and safe error codes to clients;
+  log exception details and correlation/trace IDs server-side, never stack
+  traces in API responses.
 
 ## Workbook discrepancy
 
@@ -135,14 +221,13 @@ allows the coordinates to be traced back to the workbook.
 
 ## Open decisions before API implementation
 
-1. Define exact API route names, methods, validation rules, and detailed
-   success/error data fields within the response envelope.
-2. Define atomic conflict behavior for concurrent seat reservations and
-   designation changes; keep quota usage consistent when a reservation is
-   changed or cancelled.
-3. Define the precise event start/end boundary behavior for locking changes
-   and automatically transitioning to completed status; event time zone is
-   confirmed as `Europe/Moscow`.
+The core MVP routes, validation approach, response envelope, booking conflict,
+and event time rules are specified above. Implementation may still choose
+framework-specific status/error plumbing, database locking/constraint
+mechanisms, and scheduler technology, provided the external behavior remains
+the same. Broader authentication/login details and any features beyond one
+administrator and administrator-created users remain outside this seat-map
+MVP.
 
 The workbook-grid `x`/`y` values are source references for the catalogue, not
 customer-facing fields. The user-facing map needs only row labels and seat
