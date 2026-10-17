@@ -1,6 +1,7 @@
 using KapeldinerService.Infrastructure.Postgres;
 using KapeldinerService.Infrastructure.Postgres.Authentication;
 using KapeldinerService.Web.Auth;
+using KapeldinerService.Web.Events;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
@@ -18,6 +19,9 @@ builder.Services.AddDbContextFactory<KapeldinerServiceDbContext>(options => opti
 builder.Services.AddSingleton<IPasswordHasher<AuthUser>, PasswordHasher<AuthUser>>();
 builder.Services.AddSingleton<IUserEmailSender, SmtpUserEmailSender>();
 builder.Services.AddSingleton<EfAuthenticationTicketStore>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<EventCompletionService>();
+builder.Services.AddHostedService<EventCompletionBackgroundService>();
 builder.Services.AddHostedService<AdminBootstrapper>();
 
 bool isProduction = builder.Environment.IsProduction();

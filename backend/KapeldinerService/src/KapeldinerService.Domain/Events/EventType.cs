@@ -4,6 +4,6 @@ public enum StatusEvent
 {
     Draft,
     Published,
-    Complited,
+    Completed,
     Cancelled,
 }

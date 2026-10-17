@@ -23,102 +23,6 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
-            modelBuilder.Entity("KapeldinerService.Infrastructure.Postgres.Authentication.AuthSession", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("ExpiresAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("expires_at_utc");
-
-                    b.Property<string>("Ticket")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("ticket");
-
-                    b.HasKey("Id")
-                        .HasName("pk_auth_session");
-
-                    b.HasIndex("ExpiresAtUtc")
-                        .HasDatabaseName("ix_auth_session_expires_at_utc");
-
-                    b.ToTable("auth_session", (string)null);
-                });
-
-            modelBuilder.Entity("KapeldinerService.Infrastructure.Postgres.Authentication.AuthUser", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at_utc");
-
-                    b.Property<string>("Login")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("login");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(254)
-                        .HasColumnType("character varying(254)")
-                        .HasColumnName("email");
-
-                    b.Property<string>("NormalizedEmail")
-                        .IsRequired()
-                        .HasMaxLength(254)
-                        .HasColumnType("character varying(254)")
-                        .HasColumnName("normalized_email");
-
-                    b.Property<string>("NormalizedLogin")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("normalized_login");
-
-                    b.Property<string>("PasswordHash")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("character varying(512)")
-                        .HasColumnName("password_hash");
-
-                    b.Property<string>("Role")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("role");
-
-                    b.HasKey("Id")
-                        .HasName("pk_auth_user");
-
-                    b.HasIndex("NormalizedLogin")
-                        .IsUnique()
-                        .HasDatabaseName("ux_auth_user_normalized_login");
-
-                    b.HasIndex("NormalizedEmail")
-                        .IsUnique()
-                        .HasDatabaseName("ux_auth_user_normalized_email");
-
-                    b.HasIndex("Role")
-                        .IsUnique()
-                        .HasFilter("\"role\" = 'Administrator'")
-                        .HasDatabaseName("ux_auth_user_single_administrator");
-
-                    b.ToTable("auth_user", (string)null);
-                });
-
             modelBuilder.Entity("KapeldinerService.Domain.Events.EventItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -181,7 +85,9 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.HasKey("Id")
                         .HasName("pk_event_quotas");
 
-                    b.HasIndex("EventItemId");
+                    b.HasIndex("EventItemId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_event_quota_event_user");
 
                     b.ToTable("event_quota", (string)null);
                 });
@@ -254,6 +160,103 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.HasIndex("ReservationId");
 
                     b.ToTable("reservation_seats", (string)null);
+                });
+
+            modelBuilder.Entity("KapeldinerService.Infrastructure.Postgres.Authentication.AuthSession", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at_utc");
+
+                    b.Property<string>("Ticket")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("ticket");
+
+                    b.HasKey("Id")
+                        .HasName("pk_auth_session");
+
+                    b.HasIndex("ExpiresAtUtc")
+                        .HasDatabaseName("ix_auth_session_expires_at_utc");
+
+                    b.ToTable("auth_session", (string)null);
+                });
+
+            modelBuilder.Entity("KapeldinerService.Infrastructure.Postgres.Authentication.AuthUser", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at_utc");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
+                        .HasColumnName("email");
+
+                    b.Property<string>("Login")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("login");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)")
+                        .HasColumnName("normalized_email");
+
+                    b.Property<string>("NormalizedLogin")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("normalized_login");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)")
+                        .HasColumnName("password_hash");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("role");
+
+                    b.HasKey("Id")
+                        .HasName("pk_auth_user");
+
+                    b.HasIndex("NormalizedEmail")
+                        .IsUnique()
+                        .HasDatabaseName("ux_auth_user_normalized_email");
+
+                    b.HasIndex("NormalizedLogin")
+                        .IsUnique()
+                        .HasDatabaseName("ux_auth_user_normalized_login");
+
+                    b.HasIndex("Role")
+                        .IsUnique()
+                        .HasDatabaseName("ux_auth_user_single_administrator")
+                        .HasFilter("\"role\" = 'Administrator'");
+
+                    b.ToTable("auth_user", (string)null);
                 });
 
             modelBuilder.Entity("KapeldinerService.Domain.Events.EventQuota", b =>

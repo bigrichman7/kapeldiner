@@ -8,17 +8,17 @@ public record EventItemId(Guid Value);
 
 public sealed class EventItem
 {
-    public EventItemId Id { get; } = null!;
-    public string? Title { get; }
-    public string? Description { get; }
+    public EventItemId Id { get; private set; } = null!;
+    public string? Title { get; private set; }
+    public string? Description { get; private set; }
 
-    public DateTime StardAt { get; }
+    public DateTime StardAt { get; private set; }
 
-    public DateTime EndAt { get; }
+    public DateTime EndAt { get; private set; }
 
-    public StatusEvent Status { get; }
+    public StatusEvent Status { get; private set; }
 
-    public DateTime CreatedAt { get; }
+    public DateTime CreatedAt { get; private set; }
 
     public ICollection<EventQuota> EventQuotas { get; } = new List<EventQuota>();
 
@@ -26,7 +26,7 @@ public sealed class EventItem
 
     private EventItem() { }
 
-    private EventItem(EventItemId id, string title, string description, DateTime startAt, DateTime endAt, StatusEvent status, DateTime createdAt)
+    private EventItem(EventItemId id, string title, string? description, DateTime startAt, DateTime endAt, StatusEvent status, DateTime createdAt)
     {
         Id = id;
         Title = title;
@@ -37,18 +37,97 @@ public sealed class EventItem
         CreatedAt = createdAt;
     }
 
-    public static Result<EventItem, DomainError> Create(string title, string description, DateTime startAt, DateTime endAt, StatusEvent status = StatusEvent.Draft)
+    public static Result<EventItem, DomainError> Create(
+        string title,
+        string? description,
+        DateTime startAt,
+        DateTime endAt,
+        DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(title))
             return GeneralErrors.ValueIsRequired("Title");
 
-        if (startAt <= DateTime.UtcNow || endAt <= DateTime.UtcNow)
-            return GeneralErrors.ValueIsInvalid("StartAt и EndAt не могут быть раньше текущей даты");
+        if (startAt <= nowUtc)
+            return GeneralErrors.ValueIsInvalid("StartAt должен быть позже текущего времени");
 
         if (startAt >= endAt)
-            return GeneralErrors.ValueIsInvalid("StartAt не может быть позже EndAt");
+            return GeneralErrors.ValueIsInvalid("EndAt должен быть позже StartAt");
 
-        return new EventItem(new EventItemId(Guid.CreateVersion7()), title, description, startAt, endAt, status, DateTime.UtcNow);
+        return new EventItem(
+            new EventItemId(Guid.CreateVersion7()),
+            title,
+            description,
+            startAt,
+            endAt,
+            StatusEvent.Draft,
+            nowUtc);
     }
-}
 
+    public Result<EventItem, DomainError> Update(
+        string title,
+        string? description,
+        DateTime startAt,
+        DateTime endAt,
+        DateTime nowUtc)
+    {
+        RefreshStatus(nowUtc);
+        if (Status is StatusEvent.Completed or StatusEvent.Cancelled)
+            return EventFailure("EVENT_NOT_EDITABLE", "Завершенное или отмененное мероприятие нельзя изменить.");
+
+        if (string.IsNullOrWhiteSpace(title))
+            return GeneralErrors.ValueIsRequired("Title");
+
+        if (startAt >= endAt)
+            return GeneralErrors.ValueIsInvalid("EndAt должен быть позже StartAt");
+
+        if (endAt <= nowUtc)
+            return GeneralErrors.ValueIsInvalid("EndAt должен быть позже текущего времени");
+
+        if (nowUtc >= StardAt && startAt != StardAt)
+            return EventFailure("EVENT_START_ALREADY_REACHED", "После начала мероприятия нельзя изменить время начала.");
+
+        if (nowUtc < StardAt && startAt <= nowUtc)
+            return GeneralErrors.ValueIsInvalid("StartAt должен быть позже текущего времени");
+
+        Title = title;
+        Description = description;
+        StardAt = startAt;
+        EndAt = endAt;
+        return this;
+    }
+
+    public Result<EventItem, DomainError> Publish(DateTime nowUtc)
+    {
+        RefreshStatus(nowUtc);
+        if (Status != StatusEvent.Draft)
+            return EventFailure("EVENT_NOT_PUBLISHABLE", "Опубликовать можно только черновик мероприятия.");
+
+        if (StardAt <= nowUtc || EndAt <= nowUtc)
+            return GeneralErrors.ValueIsInvalid("Время начала и окончания должно быть в будущем");
+
+        Status = StatusEvent.Published;
+        return this;
+    }
+
+    public Result<EventItem, DomainError> Cancel(DateTime nowUtc)
+    {
+        RefreshStatus(nowUtc);
+        if (Status is StatusEvent.Completed or StatusEvent.Cancelled)
+            return EventFailure("EVENT_NOT_CANCELLABLE", "Завершенное или отмененное мероприятие нельзя отменить.");
+
+        Status = StatusEvent.Cancelled;
+        return this;
+    }
+
+    public bool RefreshStatus(DateTime nowUtc)
+    {
+        if (Status is StatusEvent.Completed or StatusEvent.Cancelled || EndAt > nowUtc)
+            return false;
+
+        Status = StatusEvent.Completed;
+        return true;
+    }
+
+    private static DomainError EventFailure(string code, string message) =>
+        new(code, message, ErrorType.ValidationError);
+}

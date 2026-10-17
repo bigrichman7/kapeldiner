@@ -44,6 +44,10 @@ public class EventQuotaConfiguration : IEntityTypeConfiguration<EventQuota>
             .HasForeignKey(eq => eq.EventItemId)
             .IsRequired()
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder
+            .HasIndex(eq => new { eq.EventItemId, eq.UserId })
+            .IsUnique()
+            .HasDatabaseName("ux_event_quota_event_user");
     }
 }
-
