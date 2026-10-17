@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <UserSecretsId>kapeldiner-service-web-8f2d1d7a-8900-4a31-8d0d-079be6dbe4a1</UserSecretsId>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../KapeldinerService.Core/KapeldinerService.Core.csproj" />
     <ProjectReference Include="../KapeldinerService.Domain/KapeldinerService.Domain.csproj" />
