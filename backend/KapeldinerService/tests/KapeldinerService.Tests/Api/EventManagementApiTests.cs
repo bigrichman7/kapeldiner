@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using KapeldinerService.Domain.Events;
+using KapeldinerService.Domain.Reservations;
 using KapeldinerService.Infrastructure.Postgres;
 using KapeldinerService.Infrastructure.Postgres.Authentication;
 using KapeldinerService.Web.Auth;
@@ -18,6 +19,8 @@ public sealed class ApiIntegrationTestGroup
 public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFactory>
 {
     private static readonly Guid ExistingUserId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    private static readonly string[] FirstCancelSeat = ["1-1"];
+    private static readonly string[] SecondCancelSeat = ["1-2"];
     private readonly UserManagementApiFactory _factory;
     private readonly HttpClient _client;
 
@@ -68,6 +71,8 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
         Assert.Equal("published", visibleEvent.GetProperty("status").GetString());
         Assert.True(visibleEvent.GetProperty("bookingOpen").GetBoolean());
         Assert.Equal(5, visibleEvent.GetProperty("myQuota").GetProperty("availableSeats").GetInt32());
+        Assert.Equal(0, visibleEvent.GetProperty("myQuota").GetProperty("usedSeats").GetInt32());
+        Assert.Equal(5, visibleEvent.GetProperty("myQuota").GetProperty("remainingSeats").GetInt32());
 
         using HttpResponseMessage adminDetail = await SendAsAdminAsync(
             HttpMethod.Get,
@@ -76,6 +81,8 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
             await JsonDocument.ParseAsync(await adminDetail.Content.ReadAsStreamAsync());
         Assert.Equal(5, Assert.Single(adminDetailBody.RootElement.GetProperty("data")
             .GetProperty("quotas").EnumerateArray()).GetProperty("availableSeats").GetInt32());
+        Assert.Equal(5, Assert.Single(adminDetailBody.RootElement.GetProperty("data")
+            .GetProperty("quotas").EnumerateArray()).GetProperty("remainingSeats").GetInt32());
 
         using HttpResponseMessage updateResponse = await SendAsAdminAsync(
             HttpMethod.Patch,
@@ -203,6 +210,201 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(body.RootElement.GetProperty("data").GetProperty("bookingOpen").GetBoolean());
+    }
+
+    [Fact]
+    public async Task AdministratorCanManageQuotasAndUsersOnlyReceiveTheirOwnQuota()
+    {
+        await PrepareDatabaseAsync();
+        Guid secondUserId = Guid.NewGuid();
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            dbContext.AuthUsers.Add(new AuthUser
+            {
+                Id = secondUserId,
+                Login = "second-event-user",
+                NormalizedLogin = "SECOND-EVENT-USER",
+                Name = "Second Event User",
+                Email = "second-event-user@example.com",
+                NormalizedEmail = "SECOND-EVENT-USER@EXAMPLE.COM",
+                PasswordHash = "not-used",
+                Role = AuthRoles.User,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = "Quota management performance",
+                startAt,
+                endAt = startAt.AddHours(2),
+                quotas = Array.Empty<object>()
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+        using HttpResponseMessage publishResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+
+        using HttpResponseMessage firstQuotaResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}",
+            new { availableSeats = 4 });
+        using HttpResponseMessage secondQuotaResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{secondUserId:D}",
+            new { availableSeats = 8 });
+        using HttpResponseMessage adminQuotasResponse = await SendAsAdminAsync(
+            HttpMethod.Get,
+            $"/api/admin/events/{eventId:D}/quotas");
+        using JsonDocument adminQuotasBody =
+            await JsonDocument.ParseAsync(await adminQuotasResponse.Content.ReadAsStreamAsync());
+        using HttpResponseMessage adminQuotaResponse = await SendAsAdminAsync(
+            HttpMethod.Get,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}");
+        using JsonDocument adminQuotaBody =
+            await JsonDocument.ParseAsync(await adminQuotaResponse.Content.ReadAsStreamAsync());
+        using HttpResponseMessage userEventsResponse = await SendAsUserAsync(HttpMethod.Get, "/api/events");
+        using JsonDocument userEventsBody =
+            await JsonDocument.ParseAsync(await userEventsResponse.Content.ReadAsStreamAsync());
+        JsonElement userEvent = Assert.Single(userEventsBody.RootElement.GetProperty("data").EnumerateArray());
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, firstQuotaResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondQuotaResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, adminQuotaResponse.StatusCode);
+        Assert.Equal(2, adminQuotasBody.RootElement.GetProperty("data").GetArrayLength());
+        JsonElement adminQuota = adminQuotaBody.RootElement.GetProperty("data");
+        Assert.Equal(4, adminQuota.GetProperty("availableSeats").GetInt32());
+        Assert.Equal(0, adminQuota.GetProperty("usedSeats").GetInt32());
+        Assert.Equal(4, adminQuota.GetProperty("remainingSeats").GetInt32());
+        Assert.Equal("event-user", adminQuota.GetProperty("login").GetString());
+        Assert.Equal(4, userEvent.GetProperty("myQuota").GetProperty("availableSeats").GetInt32());
+        Assert.Equal(4, userEvent.GetProperty("myQuota").GetProperty("remainingSeats").GetInt32());
+        Assert.Equal(JsonValueKind.Null, userEvent.GetProperty("quotas").ValueKind);
+        Assert.Equal(JsonValueKind.Null, userEvent.GetProperty("myQuota").GetProperty("userId").ValueKind);
+
+        using HttpResponseMessage updateResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}",
+            new { availableSeats = 5 });
+        using HttpResponseMessage userDetailResponse = await SendAsUserAsync(
+            HttpMethod.Get,
+            $"/api/events/{eventId:D}");
+        using JsonDocument userDetailBody =
+            await JsonDocument.ParseAsync(await userDetailResponse.Content.ReadAsStreamAsync());
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+        Assert.Equal(5, userDetailBody.RootElement.GetProperty("data")
+            .GetProperty("myQuota").GetProperty("remainingSeats").GetInt32());
+
+        using HttpResponseMessage invalidQuotaResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}",
+            new { availableSeats = -1 });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidQuotaResponse.StatusCode);
+
+        using HttpResponseMessage deleteResponse = await SendAsAdminAsync(
+            HttpMethod.Delete,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}");
+        using HttpResponseMessage removedUserEvent = await SendAsUserAsync(HttpMethod.Get, $"/api/events/{eventId:D}");
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, removedUserEvent.StatusCode);
+
+        await using KapeldinerServiceDbContext cleanupContext = await _factory.CreateDbContextAsync();
+        EventItem eventToDelete = await cleanupContext.EventItems.SingleAsync(item => item.Id == new EventItemId(eventId));
+        cleanupContext.EventItems.Remove(eventToDelete);
+        await cleanupContext.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task LoweringQuotaRequiresExactSeatCancellationsAndCannotDeleteActiveBookings()
+    {
+        await PrepareDatabaseAsync();
+        DateTime nowUtc = DateTime.UtcNow;
+        EventItem eventItem = EventItem.Create(
+            "Quota reduction performance",
+            null,
+            nowUtc.AddHours(2),
+            nowUtc.AddHours(4),
+            nowUtc).Value;
+        Assert.True(eventItem.Publish(nowUtc).IsSuccess);
+        EventQuota quota = EventQuota.Create(eventItem.Id, ExistingUserId, 3).Value;
+        Assert.True(quota.ReserveSeats(2).IsSuccess);
+        Seat[] seats =
+        [
+            Seat.Create(1, 1, SeatType.booked).Value,
+            Seat.Create(1, 2, SeatType.booked).Value
+        ];
+        var reservation = new Reservation(
+            new ReservationId(Guid.NewGuid()),
+            eventItem.Id,
+            ExistingUserId,
+            seats,
+            quota.Id)
+        {
+            EventQuota = quota
+        };
+        quota.Reservation = reservation;
+        eventItem.EventQuotas.Add(quota);
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            dbContext.EventItems.Add(eventItem);
+            dbContext.EventQuotas.Add(quota);
+            dbContext.Add(reservation);
+            await dbContext.SaveChangesAsync();
+        }
+
+        using HttpResponseMessage deleteWithBookings = await SendAsAdminAsync(
+            HttpMethod.Delete,
+            $"/api/admin/events/{eventItem.Id.Value:D}/quotas/{ExistingUserId:D}");
+        using HttpResponseMessage missingCancellation = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventItem.Id.Value:D}/quotas/{ExistingUserId:D}",
+            new { availableSeats = 1 });
+        using HttpResponseMessage firstCancellation = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventItem.Id.Value:D}/quotas/{ExistingUserId:D}",
+            new { availableSeats = 1, cancelSeatIds = FirstCancelSeat });
+
+        Assert.Equal(HttpStatusCode.Conflict, deleteWithBookings.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, missingCancellation.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, firstCancellation.StatusCode);
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            EventQuota updatedQuota = await dbContext.EventQuotas
+                .Include(item => item.Reservation)
+                .ThenInclude(item => item!.ReservationSeats)
+                .SingleAsync(item => item.EventItemId == eventItem.Id && item.UserId == ExistingUserId);
+            Assert.Equal(1, updatedQuota.AvailableSeats);
+            Assert.Equal(1, updatedQuota.UsedSeats);
+            Seat remainingSeat = Assert.Single(updatedQuota.Reservation!.ReservationSeats).Seat;
+            Assert.Equal((1, 2), (remainingSeat.RowNumber, remainingSeat.SeatNumber));
+        }
+
+        using HttpResponseMessage finalCancellation = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventItem.Id.Value:D}/quotas/{ExistingUserId:D}",
+            new { availableSeats = 0, cancelSeatIds = SecondCancelSeat });
+        Assert.Equal(HttpStatusCode.OK, finalCancellation.StatusCode);
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            EventQuota updatedQuota = await dbContext.EventQuotas
+                .SingleAsync(item => item.EventItemId == eventItem.Id && item.UserId == ExistingUserId);
+            Assert.Equal(0, updatedQuota.AvailableSeats);
+            Assert.Equal(0, updatedQuota.UsedSeats);
+            Assert.False(await dbContext.Set<Reservation>().AnyAsync(item => item.EventQuotaId == updatedQuota.Id));
+        }
+
+        await using KapeldinerServiceDbContext cleanupContext = await _factory.CreateDbContextAsync();
+        EventItem eventToDelete = await cleanupContext.EventItems.SingleAsync(item => item.Id == eventItem.Id);
+        cleanupContext.EventItems.Remove(eventToDelete);
+        await cleanupContext.SaveChangesAsync();
     }
 
     private async Task PrepareDatabaseAsync()
