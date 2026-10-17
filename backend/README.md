@@ -110,6 +110,20 @@ repository root. No production credentials or tracked settings are required.
    concurrency test runs only when `KAPELDINER_TEST_POSTGRES_CONNECTION` points
    at a disposable test database.
 
+### Run the frontend
+
+Once the API is running, start the React development server from `frontend/`:
+
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+Open the local URL printed by Vite. Its `/api` proxy forwards requests to the
+HTTPS Development API at `https://localhost:7282`; see the
+[frontend guide](../frontend/README.md) for frontend checks and account notes.
+
 ### Optional email for local user creation
 
 Creating an account through `POST /api/admin/users` sends a generated
@@ -276,8 +290,8 @@ selected user.
 reserved seats required to bring usage within the new capacity. The quota and
 cancellations are committed together. Quota `PUT` accepts 0 to 643; a quota
 with reservations cannot be deleted. Initial event creation differs: it
-ignores zero-capacity quota entries and currently validates only that the
-initial capacity is non-negative (it does not apply the 643-seat maximum).
+ignores zero-capacity quota entries; positive initial capacities are limited
+to the hall's 643 seats.
 
 **Set a seat designation**:
 
@@ -312,10 +326,10 @@ cannot be designated while booked.
 - A `User` can see only published events with a positive quota and can only
   read/book their own event reservation. Zero quota does not grant visibility.
 - User reservations are accepted only for a published event before its start.
-  Reservation replacement/cancellation, quota edits, and designation changes
-  are also rejected from the event start onward, including for administrators.
-  Quota/designation failures use `409 EVENT_NOT_EDITABLE`; reservation writes
-  use `409 EVENT_NOT_BOOKABLE`.
+  Administrators may replace/cancel reservations and edit quotas/designations
+  for a published event after it starts and until it ends. Canceled and
+  completed events are read-only. Quota/designation failures use
+  `409 EVENT_NOT_EDITABLE`; reservation writes use `409 EVENT_NOT_BOOKABLE`.
 - Administrators may edit event details while the event is running if they
   leave its start time unchanged and set an end time still in the future.
   Canceled and completed events cannot be edited. Events become `completed`
@@ -353,16 +367,8 @@ cannot be designated while booked.
 Requirements in [the product spec](../docs/product-spec.md) are not proof
 that a behavior exists. In the current code:
 
-- The product requirements allow administrators to change reservations,
-  quotas, and designations after event start but before event end. The
-  implementation rejects all three from the start (`EVENT_NOT_BOOKABLE` for
-  reservations, `EVENT_NOT_EDITABLE` for quotas/designations). Event detail
-  edits are a separate case: they may continue after start with the original
-  start time unchanged and a future end time.
 - Event creation stores only positive initial quotas. A zero-capacity quota
   sent in the create request is ignored; a later quota `PUT` can store zero.
-- Quota `PUT` enforces a maximum of 643 seats, but initial quotas supplied
-  during event creation currently have no matching maximum validation.
 - Account creation depends on an SMTP server and sends a permanent password
   by email. Without SMTP, the user is not created. This is not a local
   no-mail account-creation flow.

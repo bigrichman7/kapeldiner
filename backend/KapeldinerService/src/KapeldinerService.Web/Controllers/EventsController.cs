@@ -20,6 +20,7 @@ public sealed class EventsController(
     EventCompletionService completionService,
     TimeProvider timeProvider) : ControllerBase
 {
+    private const int MaximumQuotaSeats = 643;
     private static readonly TimeZoneInfo EventTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow");
 
     [HttpGet("admin/events")]
@@ -377,6 +378,8 @@ public sealed class EventsController(
         InitialQuotaRequest[] quotas = request.Quotas?.ToArray() ?? [];
         if (quotas.Any(quota => quota.UserId == Guid.Empty || quota.AvailableSeats < 0))
             fields["quotas"] = ["Укажите корректные идентификаторы пользователей и неотрицательные квоты."];
+        if (quotas.Any(quota => quota.AvailableSeats > MaximumQuotaSeats))
+            fields["quotas"] = [$"Квота не должна превышать {MaximumQuotaSeats} мест."];
         if (quotas.Select(quota => quota.UserId).Distinct().Count() != quotas.Length)
             fields["quotas"] = ["Нельзя указывать пользователя в квотах несколько раз."];
 

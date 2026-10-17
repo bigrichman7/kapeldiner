@@ -34,6 +34,32 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     }
 
     [Fact]
+    public async Task EventCreationRejectsInitialQuotaAboveHallCapacity()
+    {
+        await PrepareDatabaseAsync();
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage response = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = "Quota capacity validation",
+                startAt,
+                endAt = startAt.AddHours(1),
+                quotas = new[] { new { userId = ExistingUserId, availableSeats = 644 } }
+            });
+        using JsonDocument body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("VALIDATION_FAILED", body.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Contains(
+            "643",
+            Assert.Single(body.RootElement.GetProperty("error").GetProperty("fields")
+                .GetProperty("quotas").EnumerateArray().Select(item => item.GetString()!)),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DraftVisibilityAndStatusTransitionsFollowEventAndQuotaAccess()
     {
         await PrepareDatabaseAsync();
@@ -336,7 +362,7 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     }
 
     [Fact]
-    public async Task RunningPublishedEventIsVisibleButNotBookable()
+    public async Task RunningPublishedEventAllowsAdministratorChangesButNotUserBookings()
     {
         await PrepareDatabaseAsync();
         DateTime nowUtc = DateTime.UtcNow;
@@ -387,16 +413,16 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
         Assert.False(body.RootElement.GetProperty("data").GetProperty("bookingOpen").GetBoolean());
         Assert.Equal(HttpStatusCode.Conflict, userBooking.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, userCancellation.StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, administratorBooking.StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, administratorCancellation.StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, quotaUpdate.StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict, designationUpdate.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, administratorBooking.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, administratorCancellation.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, quotaUpdate.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, designationUpdate.StatusCode);
         await using KapeldinerServiceDbContext verificationContext = await _factory.CreateDbContextAsync();
         EventQuota savedQuota = await verificationContext.EventQuotas
             .SingleAsync(item => item.EventItemId == runningEvent.Id && item.UserId == ExistingUserId);
-        Assert.Equal(5, savedQuota.AvailableSeats);
+        Assert.Equal(4, savedQuota.AvailableSeats);
         Assert.Equal(0, savedQuota.UsedSeats);
-        Assert.Empty(await verificationContext.EventSeatDesignations
+        Assert.Single(await verificationContext.EventSeatDesignations
             .Where(item => item.EventItemId == runningEvent.Id)
             .ToArrayAsync());
     }

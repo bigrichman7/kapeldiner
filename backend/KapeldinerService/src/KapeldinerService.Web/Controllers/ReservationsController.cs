@@ -383,7 +383,7 @@ public sealed class ReservationsController(
 
         EventItem? eventItem = await dbContext.EventItems
             .SingleOrDefaultAsync(item => item.Id == new EventItemId(eventId), cancellationToken);
-        IActionResult? eventError = ValidateBookableEvent(eventItem);
+        IActionResult? eventError = ValidateBookableEvent(eventItem, administrator);
         if (eventError is not null)
             return eventError;
 
@@ -532,7 +532,7 @@ public sealed class ReservationsController(
                 "Бронирование изменилось параллельно. Обновите данные и повторите запрос."));
         }
 
-        eventError = ValidateBookableEvent(eventItem);
+        eventError = ValidateBookableEvent(eventItem, administrator);
         if (eventError is not null)
             return eventError;
 
@@ -559,19 +559,21 @@ public sealed class ReservationsController(
         return Ok(ApiResponse.Ok(response));
     }
 
-    private IActionResult? ValidateBookableEvent(EventItem? eventItem)
+    private IActionResult? ValidateBookableEvent(EventItem? eventItem, bool administrator)
     {
         if (eventItem is null)
             return NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."));
 
         DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
         if (eventItem.Status != StatusEvent.Published
-            || eventItem.StardAt <= nowUtc
+            || (!administrator && eventItem.StardAt <= nowUtc)
             || eventItem.EndAt <= nowUtc)
         {
             return Conflict(ApiResponse.Failure<object>(
                 "EVENT_NOT_BOOKABLE",
-                "Бронирование доступно только для опубликованных мероприятий до их начала."));
+                administrator
+                    ? "Администраторское бронирование доступно до завершения мероприятия."
+                    : "Бронирование доступно только для опубликованных мероприятий до их начала."));
         }
 
         return null;
@@ -584,12 +586,11 @@ public sealed class ReservationsController(
 
         DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
         if (eventItem.Status is StatusEvent.Completed or StatusEvent.Cancelled
-            || eventItem.StardAt <= nowUtc
             || eventItem.EndAt <= nowUtc)
         {
             return Conflict(ApiResponse.Failure<object>(
                 "EVENT_NOT_EDITABLE",
-                "Обозначения мест нельзя изменить после начала мероприятия или после его завершения."));
+                "Обозначения мест нельзя изменить после завершения мероприятия."));
         }
 
         return null;
