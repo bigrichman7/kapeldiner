@@ -19,7 +19,7 @@ public sealed class EfAuthenticationTicketStore(IDbContextFactory<KapeldinerServ
         dbContext.AuthSessions.Add(new AuthSession
         {
             Id = id,
-            Ticket = TicketSerializer.Default.Serialize(ticket),
+            Ticket = Convert.ToBase64String(TicketSerializer.Default.Serialize(ticket)),
             ExpiresAtUtc = expiresAtUtc
         });
         await dbContext.SaveChangesAsync();
@@ -36,7 +36,7 @@ public sealed class EfAuthenticationTicketStore(IDbContextFactory<KapeldinerServ
             return;
         }
 
-        session.Ticket = TicketSerializer.Default.Serialize(ticket);
+        session.Ticket = Convert.ToBase64String(TicketSerializer.Default.Serialize(ticket));
         session.ExpiresAtUtc = GetExpiresAtUtc(ticket);
         await dbContext.SaveChangesAsync();
     }
@@ -57,7 +57,7 @@ public sealed class EfAuthenticationTicketStore(IDbContextFactory<KapeldinerServ
             return null;
         }
 
-        return TicketSerializer.Default.Deserialize(session.Ticket);
+        return TicketSerializer.Default.Deserialize(Convert.FromBase64String(session.Ticket));
     }
 
     public async Task RemoveAsync(string key)

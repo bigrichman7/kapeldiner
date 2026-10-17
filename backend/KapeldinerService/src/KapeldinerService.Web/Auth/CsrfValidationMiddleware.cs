@@ -1,3 +1,4 @@
+using System;
 using Microsoft.AspNetCore.Antiforgery;
 
 namespace KapeldinerService.Web.Auth;
@@ -14,7 +15,7 @@ public sealed class CsrfValidationMiddleware(RequestDelegate next)
             || HttpMethods.IsDelete(context.Request.Method);
         bool isCookieAuthenticated = context.User.Identity?.IsAuthenticated == true;
 
-        if (isUnsafeMethod && (context.Request.Path.Equals(LoginPath) || isCookieAuthenticated))
+        if (isUnsafeMethod && (context.Request.Path.Equals(LoginPath, StringComparison.OrdinalIgnoreCase) || isCookieAuthenticated))
         {
             try
             {
@@ -23,7 +24,7 @@ public sealed class CsrfValidationMiddleware(RequestDelegate next)
             catch (AntiforgeryValidationException)
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure(
+                await context.Response.WriteAsJsonAsync(ApiResponse.Failure<object>(
                     "CSRF_VALIDATION_FAILED",
                     "Запрос отклонен: отсутствует или недействителен CSRF-токен."));
                 return;

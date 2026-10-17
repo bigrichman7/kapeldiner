@@ -29,6 +29,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.Name = authCookieName;
         options.Cookie.HttpOnly = true;
         options.Cookie.IsEssential = true;
+        options.Cookie.Path = "/";
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = securePolicy;
         options.ExpireTimeSpan = TimeSpan.FromHours(8);

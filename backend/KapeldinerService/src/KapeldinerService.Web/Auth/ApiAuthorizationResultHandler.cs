@@ -16,7 +16,7 @@ public sealed class ApiAuthorizationResultHandler : IAuthorizationMiddlewareResu
         if (authorizeResult.Challenged)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            return context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure(
+            return context.Response.WriteAsJsonAsync(ApiResponse.Failure<object>(
                 "UNAUTHENTICATED",
                 "Для выполнения запроса необходимо войти."));
         }
@@ -24,7 +24,7 @@ public sealed class ApiAuthorizationResultHandler : IAuthorizationMiddlewareResu
         if (authorizeResult.Forbidden)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            return context.Response.WriteAsJsonAsync(ApiResponse<object>.Failure(
+            return context.Response.WriteAsJsonAsync(ApiResponse.Failure<object>(
                 "FORBIDDEN",
                 "Недостаточно прав для выполнения запроса."));
         }

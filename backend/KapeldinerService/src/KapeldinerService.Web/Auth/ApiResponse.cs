@@ -1,10 +1,12 @@
 namespace KapeldinerService.Web.Auth;
 
-public sealed record ApiResponse<T>(bool Success, T? Data, ApiError? Error)
-{
-    public static ApiResponse<T> Ok(T data) => new(true, data, null);
+public sealed record ApiEnvelope<T>(bool Success, T? Data, ApiError? Error);
 
-    public static ApiResponse<T> Failure(string code, string message) =>
+public static class ApiResponse
+{
+    public static ApiEnvelope<T> Ok<T>(T data) => new(true, data, null);
+
+    public static ApiEnvelope<T> Failure<T>(string code, string message) =>
         new(false, default, new ApiError(code, message, null));
 }
 

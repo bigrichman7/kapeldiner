@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace KapeldinerService.Web.Auth;
 
-public sealed class AdminBootstrapper(
+public sealed partial class AdminBootstrapper(
     IDbContextFactory<KapeldinerServiceDbContext> contextFactory,
     IConfiguration configuration,
     IHostEnvironment environment,
@@ -16,18 +16,18 @@ public sealed class AdminBootstrapper(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        await using KapeldinerServiceDbContext dbContext = await contextFactory.CreateDbContextAsync(cancellationToken);
-
-        if (await dbContext.AuthUsers.AnyAsync(user => user.Role == AuthRoles.Administrator, cancellationToken))
-        {
-            return;
-        }
-
         string? login = configuration[$"{AdminConfigurationPath}:Login"];
         string? password = configuration[$"{AdminConfigurationPath}:Password"];
         if (string.IsNullOrWhiteSpace(login) && string.IsNullOrWhiteSpace(password) && environment.IsDevelopment())
         {
-            logger.LogInformation("Development admin bootstrap is disabled because no credentials are configured.");
+            LogDevelopmentBootstrapDisabled(logger);
+            return;
+        }
+
+        await using KapeldinerServiceDbContext dbContext = await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        if (await dbContext.AuthUsers.AnyAsync(user => user.Role == AuthRoles.Administrator, cancellationToken))
+        {
             return;
         }
 
@@ -61,8 +61,14 @@ public sealed class AdminBootstrapper(
         dbContext.AuthUsers.Add(admin);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        logger.LogInformation("Bootstrapped the initial administrator account.");
+        LogAdministratorBootstrapped(logger);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Development admin bootstrap is disabled because no credentials are configured.")]
+    private static partial void LogDevelopmentBootstrapDisabled(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Bootstrapped the initial administrator account.")]
+    private static partial void LogAdministratorBootstrapped(ILogger logger);
 }

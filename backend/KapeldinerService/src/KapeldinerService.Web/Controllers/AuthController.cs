@@ -17,32 +17,37 @@ public sealed class AuthController(
     IDbContextFactory<KapeldinerServiceDbContext> contextFactory,
     IPasswordHasher<AuthUser> passwordHasher) : ControllerBase
 {
+    private static readonly AuthUser DummyUser = new()
+    {
+        Id = Guid.Empty,
+        Login = "unknown",
+        NormalizedLogin = "UNKNOWN",
+        PasswordHash = string.Empty,
+        Role = AuthRoles.User,
+        CreatedAtUtc = DateTime.UnixEpoch
+    };
+
     private static readonly Lazy<string> DummyPasswordHash = new(() =>
-        new PasswordHasher<AuthUser>().HashPassword(new AuthUser
-        {
-            Id = Guid.Empty,
-            Login = "unknown",
-            NormalizedLogin = "UNKNOWN",
-            PasswordHash = string.Empty,
-            Role = AuthRoles.User,
-            CreatedAtUtc = DateTime.UnixEpoch
-        }, "not-a-real-user-password"));
+        new PasswordHasher<AuthUser>().HashPassword(DummyUser, "not-a-real-user-password"));
 
     [HttpGet("csrf")]
     [AllowAnonymous]
     public IActionResult GetCsrfToken([FromServices] Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery)
     {
         Microsoft.AspNetCore.Antiforgery.AntiforgeryTokenSet tokens = antiforgery.GetAndStoreTokens(HttpContext);
-        return Ok(ApiResponse<object>.Ok(new { requestToken = tokens.RequestToken }));
+        return Ok(ApiResponse.Ok(new { requestToken = tokens.RequestToken }));
     }
 
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Login) || string.IsNullOrEmpty(request.Password))
+        if (string.IsNullOrWhiteSpace(request.Login)
+            || request.Login.Trim().Length > 50
+            || string.IsNullOrEmpty(request.Password)
+            || request.Password.Length > 1024)
         {
-            return BadRequest(ApiResponse<object>.Failure("INVALID_CREDENTIALS", "Укажите логин и пароль."));
+            return BadRequest(ApiResponse.Failure<object>("INVALID_CREDENTIALS", "Укажите логин и пароль."));
         }
 
         string normalizedLogin = request.Login.Trim().ToUpperInvariant();
@@ -52,12 +57,12 @@ public sealed class AuthController(
             cancellationToken);
 
         PasswordVerificationResult verification = user is null
-            ? new PasswordHasher<AuthUser>().VerifyHashedPassword(null!, DummyPasswordHash.Value, request.Password)
+            ? passwordHasher.VerifyHashedPassword(DummyUser, DummyPasswordHash.Value, request.Password)
             : passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
 
         if (user is null || verification == PasswordVerificationResult.Failed)
         {
-            return Unauthorized(ApiResponse<object>.Failure("INVALID_CREDENTIALS", "Неверный логин или пароль."));
+            return Unauthorized(ApiResponse.Failure<object>("INVALID_CREDENTIALS", "Неверный логин или пароль."));
         }
 
         if (verification == PasswordVerificationResult.SuccessRehashNeeded)
@@ -85,14 +90,14 @@ public sealed class AuthController(
                 AllowRefresh = true
             });
 
-        return Ok(ApiResponse<object>.Ok(new { id = user.Id, login = user.Login, role = user.Role }));
+        return Ok(ApiResponse.Ok(new { id = user.Id, login = user.Login, role = user.Role }));
     }
 
     [HttpGet("session")]
     [Authorize]
     public IActionResult GetCurrentSession()
     {
-        return Ok(ApiResponse<object>.Ok(new
+        return Ok(ApiResponse.Ok(new
         {
             id = User.FindFirstValue(ClaimTypes.NameIdentifier),
             login = User.Identity?.Name,
@@ -105,14 +110,14 @@ public sealed class AuthController(
     public async Task<IActionResult> Logout()
     {
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        return Ok(ApiResponse<object>.Ok(new { signedOut = true }));
+        return Ok(ApiResponse.Ok(new { signedOut = true }));
     }
 
     [HttpGet("/api/admin/session")]
     [Authorize(Policy = "AdministratorOnly")]
     public IActionResult GetAdministratorSession()
     {
-        return Ok(ApiResponse<object>.Ok(new { role = User.FindFirstValue(ClaimTypes.Role) }));
+        return Ok(ApiResponse.Ok(new { role = User.FindFirstValue(ClaimTypes.Role) }));
     }
 
     public sealed record LoginRequest(string? Login, string? Password);
