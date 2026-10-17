@@ -80,10 +80,17 @@ sharing is not configured by this service.
 
 ## Initial administrator
 
-Apply the EF migration before starting the API:
+Start PostgreSQL and configure its development connection string in User
+Secrets as described in the [backend runbook](../backend/README.md#run-locally).
+Set the environment to Development before invoking EF so the startup project
+loads User Secrets, then apply migrations before starting the API:
 
 ```powershell
-dotnet ef database update --project backend\KapeldinerService\src\KapeldinerService.Infrastructure.Postgres --startup-project backend\KapeldinerService\src\KapeldinerService.Web
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet ef database update `
+  --project backend\KapeldinerService\src\KapeldinerService.Infrastructure.Postgres\KapeldinerService.Infrastructure.Postgres.csproj `
+  --startup-project backend\KapeldinerService\src\KapeldinerService.Web\KapeldinerService.Web.csproj `
+  --context KapeldinerServiceDbContext
 ```
 
 The first administrator is inserted once from configuration. The username and
@@ -100,9 +107,11 @@ Local development has no default administrator credentials. If both settings
 are omitted, no admin is created and the API can still start. Remove the
 bootstrap secret after the account has been created.
 
-In Production, provide both `Auth__Bootstrap__Admin__Login` and
+Outside Development (including Production), provide both
+`Auth__Bootstrap__Admin__Login` and
 `Auth__Bootstrap__Admin__Password` using the deployment secret manager or
-environment configuration. The password must contain at least 12 characters.
+environment configuration when bootstrapping the first administrator. The
+password must contain at least 12 characters.
 If no administrator exists and either setting is missing, startup fails rather
 than creating a known account. Once an administrator exists, the bootstrap
 settings can be removed. Only one administrator role is allowed by a unique
