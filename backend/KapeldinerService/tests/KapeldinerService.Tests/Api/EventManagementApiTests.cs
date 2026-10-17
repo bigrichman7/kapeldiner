@@ -21,6 +21,9 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     private static readonly Guid ExistingUserId = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly string[] FirstCancelSeat = ["1-1"];
     private static readonly string[] SecondCancelSeat = ["1-2"];
+    private static readonly string[] InitialReservationSeats = ["1-1", "1-2"];
+    private static readonly string[] ReplacementReservationSeats = ["1-2", "1-3"];
+    private static readonly string[] OccupiedReservationSeat = ["1-1"];
     private readonly UserManagementApiFactory _factory;
     private readonly HttpClient _client;
 
@@ -207,9 +210,46 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
 
         using HttpResponseMessage response = await SendAsUserAsync(HttpMethod.Get, $"/api/events/{runningEvent.Id.Value:D}");
         using JsonDocument body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        using HttpResponseMessage userBooking = await SendWithRoleAsync(
+            HttpMethod.Put,
+            $"/api/events/{runningEvent.Id.Value:D}/my-reservation",
+            AuthRoles.User,
+            new { seatIds = OccupiedReservationSeat });
+        using HttpResponseMessage userCancellation = await SendAsUserAsync(
+            HttpMethod.Delete,
+            $"/api/events/{runningEvent.Id.Value:D}/my-reservation");
+        using HttpResponseMessage administratorBooking = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{runningEvent.Id.Value:D}/quotas/{ExistingUserId:D}/reservation",
+            new { seatIds = OccupiedReservationSeat });
+        using HttpResponseMessage administratorCancellation = await SendAsAdminAsync(
+            HttpMethod.Delete,
+            $"/api/admin/events/{runningEvent.Id.Value:D}/quotas/{ExistingUserId:D}/reservation");
+        using HttpResponseMessage quotaUpdate = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{runningEvent.Id.Value:D}/quotas/{ExistingUserId:D}",
+            new { availableSeats = 4 });
+        using HttpResponseMessage designationUpdate = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{runningEvent.Id.Value:D}/seats/1-1/designation",
+            new { designation = "vip" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(body.RootElement.GetProperty("data").GetProperty("bookingOpen").GetBoolean());
+        Assert.Equal(HttpStatusCode.Conflict, userBooking.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, userCancellation.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, administratorBooking.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, administratorCancellation.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, quotaUpdate.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, designationUpdate.StatusCode);
+        await using KapeldinerServiceDbContext verificationContext = await _factory.CreateDbContextAsync();
+        EventQuota savedQuota = await verificationContext.EventQuotas
+            .SingleAsync(item => item.EventItemId == runningEvent.Id && item.UserId == ExistingUserId);
+        Assert.Equal(5, savedQuota.AvailableSeats);
+        Assert.Equal(0, savedQuota.UsedSeats);
+        Assert.Empty(await verificationContext.EventSeatDesignations
+            .Where(item => item.EventItemId == runningEvent.Id)
+            .ToArrayAsync());
     }
 
     [Fact]
@@ -403,6 +443,98 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
 
         await using KapeldinerServiceDbContext cleanupContext = await _factory.CreateDbContextAsync();
         EventItem eventToDelete = await cleanupContext.EventItems.SingleAsync(item => item.Id == eventItem.Id);
+        cleanupContext.EventItems.Remove(eventToDelete);
+        await cleanupContext.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task ReservationCanBeReplacedAndCancelledAndOccupiedSeatsAreRejected()
+    {
+        await PrepareDatabaseAsync();
+        Guid secondUserId = Guid.NewGuid();
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            dbContext.AuthUsers.Add(new AuthUser
+            {
+                Id = secondUserId,
+                Login = "reservation-user",
+                NormalizedLogin = "RESERVATION-USER",
+                Name = "Reservation User",
+                Email = "reservation-user@example.com",
+                NormalizedEmail = "RESERVATION-USER@EXAMPLE.COM",
+                PasswordHash = "not-used",
+                Role = AuthRoles.User,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+        }
+
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = "Reservation test performance",
+                startAt,
+                endAt = startAt.AddHours(2),
+                quotas = new[] { new { userId = ExistingUserId, availableSeats = 3 } }
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+        using HttpResponseMessage publishResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        using HttpResponseMessage secondQuota = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{secondUserId:D}",
+            new { availableSeats = 3 });
+
+        using HttpResponseMessage firstBooking = await SendWithRoleAsync(
+            HttpMethod.Put,
+            $"/api/events/{eventId:D}/my-reservation",
+            AuthRoles.User,
+            new { seatIds = InitialReservationSeats });
+        using HttpResponseMessage collidingBooking = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{secondUserId:D}/reservation",
+            new { seatIds = OccupiedReservationSeat });
+        using HttpResponseMessage replaceBooking = await SendWithRoleAsync(
+            HttpMethod.Put,
+            $"/api/events/{eventId:D}/my-reservation",
+            AuthRoles.User,
+            new { seatIds = ReplacementReservationSeats });
+        using HttpResponseMessage cancelBooking = await SendAsUserAsync(
+            HttpMethod.Delete,
+            $"/api/events/{eventId:D}/my-reservation");
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondQuota.StatusCode);
+        string firstBookingBody = await firstBooking.Content.ReadAsStringAsync();
+        Assert.True(firstBooking.StatusCode == HttpStatusCode.OK, firstBookingBody);
+        Assert.Equal(HttpStatusCode.Conflict, collidingBooking.StatusCode);
+        using JsonDocument collisionBody = await JsonDocument.ParseAsync(await collidingBooking.Content.ReadAsStreamAsync());
+        Assert.Equal("SEAT_ALREADY_BOOKED", collisionBody.RootElement.GetProperty("error").GetProperty("code").GetString());
+        string replaceBodyText = await replaceBooking.Content.ReadAsStringAsync();
+        Assert.True(replaceBooking.StatusCode == HttpStatusCode.OK, replaceBodyText);
+        string cancelBodyText = await cancelBooking.Content.ReadAsStringAsync();
+        Assert.True(cancelBooking.StatusCode == HttpStatusCode.OK, cancelBodyText);
+
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            EventQuota quota = await dbContext.EventQuotas
+                .Include(item => item.Reservation)
+                .ThenInclude(reservation => reservation!.ReservationSeats)
+                .SingleAsync(item => item.EventItemId == new EventItemId(eventId) && item.UserId == ExistingUserId);
+            Assert.Equal(0, quota.UsedSeats);
+            Assert.Null(quota.Reservation);
+            Assert.False(await dbContext.Set<ReservationSeat>()
+                .AnyAsync(seat => seat.EventItemId == new EventItemId(eventId)));
+        }
+
+        await using KapeldinerServiceDbContext cleanupContext = await _factory.CreateDbContextAsync();
+        EventItem eventToDelete = await cleanupContext.EventItems.SingleAsync(item => item.Id == new EventItemId(eventId));
         cleanupContext.EventItems.Remove(eventToDelete);
         await cleanupContext.SaveChangesAsync();
     }

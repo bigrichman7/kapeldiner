@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using KapeldinerService.Domain.Common.Errors;
 using KapeldinerService.Domain.Events;
+using KapeldinerService.Domain.Reservations;
 using KapeldinerService.Infrastructure.Postgres;
 using KapeldinerService.Infrastructure.Postgres.Authentication;
 using KapeldinerService.Web.Auth;
@@ -81,7 +82,13 @@ public sealed class EventsController(
         }
 
         DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        var eventResult = EventItem.Create(values.Title, values.Description, values.StartAt, values.EndAt, nowUtc);
+        var eventResult = EventItem.Create(
+            values.Title,
+            values.Description,
+            values.StartAt,
+            values.EndAt,
+            nowUtc,
+            values.EnableAdditionalRow12A);
         if (eventResult.IsFailure)
         {
             return DomainFailure(eventResult.Error);
@@ -141,8 +148,24 @@ public sealed class EventsController(
             return ValidationFailure(fields);
         }
 
+        if (request.EnableAdditionalRow12A == false)
+        {
+            bool hasAdditionalRowReservations = await dbContext.Set<Reservation>()
+                .AnyAsync(reservation => reservation.EventItemId == eventItem.Id
+                    && reservation.ReservationSeats.Any(reservationSeat => reservationSeat.Seat.RowLabel == "12А"),
+                    cancellationToken);
+            bool hasAdditionalRowDesignations = await dbContext.EventSeatDesignations
+                .AnyAsync(seat => seat.EventItemId == eventItem.Id && seat.RowLabel == "12А", cancellationToken);
+            if (eventItem.EnableAdditionalRow12A && (hasAdditionalRowReservations || hasAdditionalRowDesignations))
+            {
+                return Conflict(ApiResponse.Failure<object>(
+                    "ADDITIONAL_ROW_IN_USE",
+                    "Сначала снимите бронирования и обозначения мест дополнительного ряда."));
+            }
+        }
+
         DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        var result = eventItem.Update(title, description, startAt, endAt, nowUtc);
+        var result = eventItem.Update(title, description, startAt, endAt, nowUtc, request.EnableAdditionalRow12A);
         if (result.IsFailure)
         {
             return DomainFailure(result.Error);
@@ -276,7 +299,13 @@ public sealed class EventsController(
             fields["quotas"] = ["Нельзя указывать пользователя в квотах несколько раз."];
 
         values = fields.Count == 0
-            ? new NormalizedCreateEvent(title, description, startAt, endAt, quotas)
+            ? new NormalizedCreateEvent(
+                title,
+                description,
+                startAt,
+                endAt,
+                quotas,
+                request.EnableAdditionalRow12A ?? false)
             : null;
         return values is not null;
     }
@@ -340,7 +369,8 @@ public sealed class EventsController(
                 && nowUtc < eventItem.StardAt
                 && nowUtc < eventItem.EndAt,
             quotaResponse,
-            quotas);
+            quotas,
+            eventItem.EnableAdditionalRow12A);
     }
 
     private static DateTimeOffset AsUtcOffset(DateTime value) =>
@@ -363,7 +393,8 @@ public sealed class EventsController(
         string? Description,
         DateTimeOffset? StartAt,
         DateTimeOffset? EndAt,
-        IReadOnlyList<InitialQuotaRequest>? Quotas);
+        IReadOnlyList<InitialQuotaRequest>? Quotas,
+        bool? EnableAdditionalRow12A);
 
     public sealed record InitialQuotaRequest(Guid UserId, int AvailableSeats);
 
@@ -371,7 +402,8 @@ public sealed class EventsController(
         string? Title,
         string? Description,
         DateTimeOffset? StartAt,
-        DateTimeOffset? EndAt);
+        DateTimeOffset? EndAt,
+        bool? EnableAdditionalRow12A);
 
     public sealed record EventResponse(
         Guid EventId,
@@ -383,7 +415,8 @@ public sealed class EventsController(
         DateTimeOffset CreatedAt,
         bool BookingOpen,
         EventQuotaResponse? MyQuota,
-        IReadOnlyList<EventQuotaResponse>? Quotas);
+        IReadOnlyList<EventQuotaResponse>? Quotas,
+        bool EnableAdditionalRow12A);
 
     public sealed record EventQuotaResponse(
         int AvailableSeats,
@@ -396,5 +429,6 @@ public sealed class EventsController(
         string? Description,
         DateTime StartAt,
         DateTime EndAt,
-        InitialQuotaRequest[] Quotas);
+        InitialQuotaRequest[] Quotas,
+        bool EnableAdditionalRow12A);
 }

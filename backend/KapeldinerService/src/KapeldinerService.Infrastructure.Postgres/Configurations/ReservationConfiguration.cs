@@ -45,12 +45,8 @@ public class ReservationConfiguration : IEntityTypeConfiguration<Reservation>
             .HasForeignKey<Reservation>(r => r.EventQuotaId)
             .IsRequired();
 
-        builder
-            .HasMany(r => r.ReservationSeats)
-            .WithOne(rs => rs.Reservation)
-            .HasForeignKey(rs => rs.ReservationId)
-            .IsRequired()
-            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasAlternateKey(r => new { r.Id, r.EventItemId })
+            .HasName("ak_reservation_id_event_item");
+
     }
 }
-

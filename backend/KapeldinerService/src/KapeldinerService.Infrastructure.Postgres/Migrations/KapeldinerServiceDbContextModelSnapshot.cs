@@ -37,6 +37,10 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                         .HasColumnType("text")
                         .HasColumnName("description");
 
+                    b.Property<bool>("EnableAdditionalRow12A")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enable_additional_row_12a");
+
                     b.Property<DateTime>("EndAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("end_at");
@@ -92,6 +96,36 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.ToTable("event_quota", (string)null);
                 });
 
+            modelBuilder.Entity("KapeldinerService.Domain.Events.EventSeatDesignation", b =>
+                {
+                    b.Property<Guid>("EventItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_item_id");
+
+                    b.Property<string>("RowLabel")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasColumnName("row_label");
+
+                    b.Property<int>("SeatNumber")
+                        .HasColumnType("integer")
+                        .HasColumnName("seat_number");
+
+                    b.Property<int>("Designation")
+                        .HasColumnType("integer")
+                        .HasColumnName("designation");
+
+                    b.HasKey("EventItemId", "RowLabel", "SeatNumber")
+                        .HasName("pk_event_seat_designation");
+
+                    b.ToTable("event_seat_designation", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_event_seat_designation_location", "row_label IN ('1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25','26','27','12А') AND seat_number BETWEEN 1 AND 26");
+
+                            t.HasCheckConstraint("ck_event_seat_designation_type", "designation IN (0, 1)");
+                        });
+                });
+
             modelBuilder.Entity("KapeldinerService.Domain.Reservations.Reservation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -113,6 +147,9 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.HasKey("Id")
                         .HasName("pk_reservations");
 
+                    b.HasAlternateKey("Id", "EventItemId")
+                        .HasName("ak_reservation_id_event_item");
+
                     b.HasIndex("EventItemId");
 
                     b.HasIndex("EventQuotaId")
@@ -127,6 +164,10 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid>("EventItemId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_item_id");
+
                     b.Property<Guid>("ReservationId")
                         .HasColumnType("uuid")
                         .HasColumnName("reservation_id");
@@ -135,17 +176,25 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("reserved_at");
 
+                    b.Property<string>("SeatKey")
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("text")
+                        .HasColumnName("seat_key")
+                        .HasComputedColumnSql("row_label || '-' || seat_number", true);
+
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Seat", "KapeldinerService.Domain.Reservations.ReservationSeat.Seat#Seat", b1 =>
                         {
                             b1.IsRequired();
 
-                            b1.Property<int>("RowNumber")
-                                .HasMaxLength(27)
-                                .HasColumnType("integer")
-                                .HasColumnName("row_number");
+                            b1.Property<string>("RowLabel")
+                                .IsRequired()
+                                .HasMaxLength(3)
+                                .HasColumnType("character varying(3)")
+                                .HasColumnName("row_label");
 
                             b1.Property<int>("SeatNumber")
-                                .HasMaxLength(25)
+                                .HasMaxLength(26)
                                 .HasColumnType("integer")
                                 .HasColumnName("seat_number");
 
@@ -157,9 +206,16 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.HasKey("Id")
                         .HasName("pk_reservation_seats");
 
-                    b.HasIndex("ReservationId");
+                    b.HasIndex("EventItemId", "SeatKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_reservation_seat_event_seat");
 
-                    b.ToTable("reservation_seats", (string)null);
+                    b.HasIndex("ReservationId", "EventItemId");
+
+                    b.ToTable("reservation_seats", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_reservation_seat_location", "row_label IN ('1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25','26','27','12А') AND seat_number BETWEEN 1 AND 26");
+                        });
                 });
 
             modelBuilder.Entity("KapeldinerService.Infrastructure.Postgres.Authentication.AuthSession", b =>
@@ -270,6 +326,17 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.Navigation("EventItem");
                 });
 
+            modelBuilder.Entity("KapeldinerService.Domain.Events.EventSeatDesignation", b =>
+                {
+                    b.HasOne("KapeldinerService.Domain.Events.EventItem", "EventItem")
+                        .WithMany("SeatDesignations")
+                        .HasForeignKey("EventItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("EventItem");
+                });
+
             modelBuilder.Entity("KapeldinerService.Domain.Reservations.Reservation", b =>
                 {
                     b.HasOne("KapeldinerService.Domain.Events.EventItem", "EventItem")
@@ -293,7 +360,8 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                 {
                     b.HasOne("KapeldinerService.Domain.Reservations.Reservation", "Reservation")
                         .WithMany("ReservationSeats")
-                        .HasForeignKey("ReservationId")
+                        .HasForeignKey("ReservationId", "EventItemId")
+                        .HasPrincipalKey("Id", "EventItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -305,6 +373,8 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.Navigation("EventQuotas");
 
                     b.Navigation("Reservations");
+
+                    b.Navigation("SeatDesignations");
                 });
 
             modelBuilder.Entity("KapeldinerService.Domain.Events.EventQuota", b =>

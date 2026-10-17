@@ -44,6 +44,10 @@ public class EventItemConfiguration : IEntityTypeConfiguration<EventItem>
         builder
             .Property(ei => ei.CreatedAt)
             .HasColumnName("created_at");
+
+        builder
+            .Property(ei => ei.EnableAdditionalRow12A)
+            .IsRequired()
+            .HasColumnName("enable_additional_row_12a");
     }
 }
-

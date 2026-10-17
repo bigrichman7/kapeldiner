@@ -20,9 +20,13 @@ public sealed class EventItem
 
     public DateTime CreatedAt { get; private set; }
 
+    public bool EnableAdditionalRow12A { get; private set; }
+
     public ICollection<EventQuota> EventQuotas { get; } = new List<EventQuota>();
 
     public ICollection<Reservation> Reservations { get; } = new List<Reservation>();
+
+    public ICollection<EventSeatDesignation> SeatDesignations { get; } = new List<EventSeatDesignation>();
 
     private EventItem() { }
 
@@ -63,12 +67,27 @@ public sealed class EventItem
             nowUtc);
     }
 
+    public static Result<EventItem, DomainError> Create(
+        string title,
+        string? description,
+        DateTime startAt,
+        DateTime endAt,
+        DateTime nowUtc,
+        bool enableAdditionalRow12A)
+    {
+        var result = Create(title, description, startAt, endAt, nowUtc);
+        if (result.IsSuccess)
+            result.Value.EnableAdditionalRow12A = enableAdditionalRow12A;
+        return result;
+    }
+
     public Result<EventItem, DomainError> Update(
         string title,
         string? description,
         DateTime startAt,
         DateTime endAt,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        bool? enableAdditionalRow12A = null)
     {
         RefreshStatus(nowUtc);
         if (Status is StatusEvent.Completed or StatusEvent.Cancelled)
@@ -93,6 +112,8 @@ public sealed class EventItem
         Description = description;
         StardAt = startAt;
         EndAt = endAt;
+        if (enableAdditionalRow12A.HasValue)
+            EnableAdditionalRow12A = enableAdditionalRow12A.Value;
         return this;
     }
 

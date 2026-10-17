@@ -80,7 +80,7 @@ public sealed class EventQuotasController(
         CancellationToken cancellationToken)
     {
         if (!TryNormalize(request, out int availableSeats, out string[] cancelSeatIds,
-                out HashSet<(int RowNumber, int SeatNumber)> seatsToCancel,
+                out HashSet<string> seatsToCancel,
                 out Dictionary<string, string[]> fields))
         {
             return ValidationFailure(fields);
@@ -154,9 +154,9 @@ public sealed class EventQuotasController(
 
             if (requiredCancellations > 0)
             {
-                HashSet<(int RowNumber, int SeatNumber)> existingSeats = quota.Reservation!.ReservationSeats
-                    .Select(seat => (seat.Seat.RowNumber, seat.Seat.SeatNumber))
-                    .ToHashSet();
+                HashSet<string> existingSeats = quota.Reservation!.ReservationSeats
+                    .Select(seat => seat.SeatId)
+                    .ToHashSet(StringComparer.Ordinal);
                 if (!seatsToCancel.IsSubsetOf(existingSeats))
                 {
                     return ValidationFailure(new Dictionary<string, string[]>(StringComparer.Ordinal)
@@ -165,7 +165,7 @@ public sealed class EventQuotasController(
                     });
                 }
 
-                int removedSeats = quota.Reservation.RemoveSeats(seatsToCancel);
+                int removedSeats = quota.Reservation.RemoveSeatIds(seatsToCancel);
                 if (removedSeats != requiredCancellations)
                 {
                     return Conflict(ApiResponse.Failure<object>(
@@ -191,15 +191,19 @@ public sealed class EventQuotasController(
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
-        catch (DbUpdateException exception) when (
-            exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        catch (Exception exception) when (
+            FindPostgresException(exception) is
+            {
+                SqlState: PostgresErrorCodes.UniqueViolation,
+                ConstraintName: "ux_event_quota_event_user"
+            })
         {
             return Conflict(ApiResponse.Failure<object>(
                 "QUOTA_ALREADY_EXISTS",
                 "Для этого пользователя уже назначена квота на мероприятие."));
         }
-        catch (PostgresException exception) when (
-            string.Equals(exception.SqlState, PostgresErrorCodes.SerializationFailure, StringComparison.Ordinal))
+        catch (Exception exception) when (
+            FindPostgresException(exception) is { SqlState: PostgresErrorCodes.SerializationFailure })
         {
             return Conflict(ApiResponse.Failure<object>(
                 "QUOTA_UPDATE_CONFLICT",
@@ -257,11 +261,24 @@ public sealed class EventQuotasController(
         }
 
         DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        if (eventItem.Status is StatusEvent.Completed or StatusEvent.Cancelled || eventItem.EndAt <= nowUtc)
+        if (eventItem.Status is StatusEvent.Completed or StatusEvent.Cancelled
+            || eventItem.StardAt <= nowUtc
+            || eventItem.EndAt <= nowUtc)
         {
             return Conflict(ApiResponse.Failure<object>(
                 "EVENT_NOT_EDITABLE",
-                "Завершенное или отмененное мероприятие нельзя изменить."));
+                "Квоты нельзя изменить после начала мероприятия или после его завершения."));
+        }
+
+        return null;
+    }
+
+    private static PostgresException? FindPostgresException(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is PostgresException postgresException)
+                return postgresException;
         }
 
         return null;
@@ -271,7 +288,7 @@ public sealed class EventQuotasController(
         UpdateQuotaRequest request,
         out int availableSeats,
         out string[] cancelSeatIds,
-        out HashSet<(int RowNumber, int SeatNumber)> seatsToCancel,
+        out HashSet<string> seatsToCancel,
         out Dictionary<string, string[]> fields)
     {
         availableSeats = request.AvailableSeats ?? 0;
@@ -286,13 +303,13 @@ public sealed class EventQuotasController(
 
         foreach (string seatId in cancelSeatIds)
         {
-            if (!TryParseSeatId(seatId, out (int RowNumber, int SeatNumber) seat))
+            if (!TryParseSeatId(seatId))
             {
                 fields["cancelSeatIds"] = ["Укажите места в формате «ряд-место», например «1-2»."];
                 break;
             }
 
-            if (!seatsToCancel.Add(seat))
+            if (!seatsToCancel.Add(seatId))
             {
                 fields["cancelSeatIds"] = ["В списке нельзя указывать одно место несколько раз."];
                 break;
@@ -302,21 +319,17 @@ public sealed class EventQuotasController(
         return fields.Count == 0;
     }
 
-    private static bool TryParseSeatId(string? seatId, out (int RowNumber, int SeatNumber) seat)
+    private static bool TryParseSeatId(string? seatId)
     {
-        seat = default;
         string[] parts = seatId?.Split('-', StringSplitOptions.None) ?? [];
         if (parts.Length != 2
-            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int rowNumber)
             || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int seatNumber)
-            || rowNumber < 1
             || seatNumber < 1)
         {
             return false;
         }
 
-        seat = (rowNumber, seatNumber);
-        return true;
+        return Seat.Create(parts[0], seatNumber, SeatType.booked).IsSuccess;
     }
 
     private BadRequestObjectResult ValidationFailure(IReadOnlyDictionary<string, string[]> fields) =>
