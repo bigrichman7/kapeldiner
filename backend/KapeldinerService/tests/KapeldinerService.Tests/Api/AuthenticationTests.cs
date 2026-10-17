@@ -6,14 +6,15 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using KapeldinerService.Web.Events;
 
 namespace KapeldinerService.Tests.Api;
 
-[Collection("API integration tests")]
 public sealed class AuthenticationTests : IClassFixture<AuthenticationApiFactory>
 {
     private const string TestRoleHeader = "X-Test-Role";
@@ -139,6 +140,12 @@ public sealed class AuthenticationApiFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureTestServices(services =>
         {
+            ServiceDescriptor? completionWorker = services.FirstOrDefault(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService)
+                && descriptor.ImplementationType == typeof(EventCompletionBackgroundService));
+            if (completionWorker is not null)
+                services.Remove(completionWorker);
+
             services.AddAuthentication(options =>
                 {
                     options.DefaultAuthenticateScheme = TestAuthenticationHandler.SchemeName;
