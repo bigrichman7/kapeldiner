@@ -61,6 +61,12 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                     b.HasKey("Id")
                         .HasName("pk_event_items");
 
+                    b.HasIndex("EndAt")
+                        .HasDatabaseName("ix_event_item_end_at");
+
+                    b.HasIndex("StardAt")
+                        .HasDatabaseName("ix_event_item_start_at");
+
                     b.ToTable("event_item", (string)null);
                 });
 

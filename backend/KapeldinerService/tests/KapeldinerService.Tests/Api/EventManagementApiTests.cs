@@ -187,6 +187,155 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     }
 
     [Fact]
+    public async Task AdminEventHistorySupportsSearchSortAndPagination()
+    {
+        await PrepareDatabaseAsync();
+        string searchTerm = $"History-{Guid.NewGuid():N}";
+        DateTimeOffset firstStart = DateTimeOffset.UtcNow.AddDays(2);
+        foreach ((string suffix, DateTimeOffset startAt) in new[]
+                 {
+                     ("First", firstStart),
+                     ("Second", firstStart.AddDays(1)),
+                     ("Third", firstStart.AddDays(2))
+                 })
+        {
+            using HttpResponseMessage createResponse = await SendAsAdminAsync(
+                HttpMethod.Post,
+                "/api/admin/events",
+                new
+                {
+                    title = $"{searchTerm} {suffix}",
+                    description = "Searchable event history",
+                    startAt,
+                    endAt = startAt.AddHours(2),
+                    quotas = Array.Empty<object>()
+                });
+            Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+            using JsonDocument createBody = await JsonDocument.ParseAsync(
+                await createResponse.Content.ReadAsStreamAsync());
+            Assert.NotEqual(Guid.Empty,
+                createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid());
+        }
+
+        string query = $"/api/admin/events?period=upcoming&search={searchTerm}"
+            + "&sortBy=startAt&sortOrder=desc&page=1&pageSize=2";
+        using HttpResponseMessage firstPage = await SendAsAdminAsync(HttpMethod.Get, query);
+        using JsonDocument firstPageBody = await JsonDocument.ParseAsync(
+            await firstPage.Content.ReadAsStreamAsync());
+        JsonElement[] firstPageEvents = firstPageBody.RootElement.GetProperty("data").EnumerateArray().ToArray();
+
+        Assert.Equal(HttpStatusCode.OK, firstPage.StatusCode);
+        Assert.Equal("3", firstPage.Headers.GetValues("X-Total-Count").Single());
+        Assert.Equal("1", firstPage.Headers.GetValues("X-Page").Single());
+        Assert.Equal("2", firstPage.Headers.GetValues("X-Page-Size").Single());
+        Assert.Equal($"{searchTerm} Third", firstPageEvents[0].GetProperty("title").GetString());
+        Assert.Equal($"{searchTerm} Second", firstPageEvents[1].GetProperty("title").GetString());
+
+        using HttpResponseMessage secondPage = await SendAsAdminAsync(
+            HttpMethod.Get,
+            $"/api/admin/events?period=upcoming&search={searchTerm}&sortBy=startAt&sortOrder=desc&page=2&pageSize=2");
+        using JsonDocument secondPageBody = await JsonDocument.ParseAsync(
+            await secondPage.Content.ReadAsStreamAsync());
+        Assert.Equal($"{searchTerm} First", Assert.Single(
+            secondPageBody.RootElement.GetProperty("data").EnumerateArray()).GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task CompletedEventReservationsRemainReadableAndCannotBeChangedOrDeleted()
+    {
+        await PrepareDatabaseAsync();
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = $"Read-only history {Guid.NewGuid():N}",
+                startAt,
+                endAt = startAt.AddHours(2),
+                quotas = new[] { new { userId = ExistingUserId, availableSeats = 2 } }
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+        using HttpResponseMessage publishResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        using HttpResponseMessage bookingResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}/reservation",
+            new { seatIds = OccupiedReservationSeat });
+        Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bookingResponse.StatusCode);
+
+        DateTime endedAt = DateTime.UtcNow.AddMinutes(-1);
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            await dbContext.EventItems
+                .Where(item => item.Id == new EventItemId(eventId))
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.StardAt, endedAt.AddHours(-2))
+                    .SetProperty(item => item.EndAt, endedAt));
+        }
+
+        using HttpResponseMessage historyResponse = await SendAsAdminAsync(
+            HttpMethod.Get,
+            $"/api/admin/events?period=past&search=Read-only%20history&status=completed");
+        using JsonDocument historyBody = await JsonDocument.ParseAsync(await historyResponse.Content.ReadAsStreamAsync());
+        JsonElement historyEvent = Assert.Single(historyBody.RootElement.GetProperty("data").EnumerateArray());
+        Assert.Equal(eventId, historyEvent.GetProperty("eventId").GetGuid());
+
+        using HttpResponseMessage reservationsResponse = await SendAsAdminAsync(
+            HttpMethod.Get,
+            $"/api/admin/events/{eventId:D}/reservations");
+        using JsonDocument reservationsBody =
+            await JsonDocument.ParseAsync(await reservationsResponse.Content.ReadAsStreamAsync());
+        Assert.Equal(OccupiedReservationSeat,
+            Assert.Single(reservationsBody.RootElement.GetProperty("data").EnumerateArray())
+                .GetProperty("seatIds").EnumerateArray().Select(seat => seat.GetString()!).ToArray());
+
+        using HttpResponseMessage statisticsResponse = await SendAsAdminAsync(
+            HttpMethod.Get,
+            $"/api/admin/events/{eventId:D}/statistics");
+        using JsonDocument statisticsBody =
+            await JsonDocument.ParseAsync(await statisticsResponse.Content.ReadAsStreamAsync());
+        JsonElement statistics = statisticsBody.RootElement.GetProperty("data");
+        Assert.Equal(2, statistics.GetProperty("allocatedQuotaSeats").GetInt32());
+        Assert.Equal(1, statistics.GetProperty("usedQuotaSeats").GetInt32());
+        Assert.Equal(1, statistics.GetProperty("remainingQuotaSeats").GetInt32());
+        Assert.Equal(1, statistics.GetProperty("reservationCount").GetInt32());
+
+        using HttpResponseMessage userReplaceResponse = await SendWithRoleAsync(
+            HttpMethod.Put,
+            $"/api/events/{eventId:D}/my-reservation",
+            AuthRoles.User,
+            new { seatIds = ReplacementReservationSeats });
+        using HttpResponseMessage userDeleteResponse = await SendAsUserAsync(
+            HttpMethod.Delete,
+            $"/api/events/{eventId:D}/my-reservation");
+        using HttpResponseMessage adminReplaceResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}/reservation",
+            new { seatIds = ReplacementReservationSeats });
+        using HttpResponseMessage adminDeleteResponse = await SendAsAdminAsync(
+            HttpMethod.Delete,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}/reservation");
+        Assert.Equal(HttpStatusCode.Conflict, userReplaceResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, userDeleteResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, adminReplaceResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, adminDeleteResponse.StatusCode);
+
+        await using KapeldinerServiceDbContext verificationContext = await _factory.CreateDbContextAsync();
+        EventQuota quota = await verificationContext.EventQuotas
+            .Include(item => item.Reservation)
+            .ThenInclude(reservation => reservation!.ReservationSeats)
+            .SingleAsync(item => item.EventItemId == new EventItemId(eventId)
+                && item.UserId == ExistingUserId);
+        Assert.Equal(1, quota.UsedSeats);
+        Assert.Equal(OccupiedReservationSeat,
+            quota.Reservation!.ReservationSeats.Select(seat => seat.SeatId).ToArray());
+    }
+
+    [Fact]
     public async Task RunningPublishedEventIsVisibleButNotBookable()
     {
         await PrepareDatabaseAsync();

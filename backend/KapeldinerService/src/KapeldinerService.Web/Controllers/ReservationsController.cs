@@ -288,6 +288,8 @@ public sealed class ReservationsController(
             .OrderBy(quota => quota.UserId)
             .ToArrayAsync(cancellationToken);
         int reservedSeats = quotas.Sum(quota => quota.UsedSeats);
+        int reservationCount = await dbContext.Set<Reservation>()
+            .CountAsync(reservation => reservation.EventItemId == eventItem.Id, cancellationToken);
         int unavailableSeats = await dbContext.EventSeatDesignations
             .CountAsync(seat => seat.EventItemId == eventItem.Id, cancellationToken);
         var userRows = await (
@@ -311,6 +313,10 @@ public sealed class ReservationsController(
             reservedSeats,
             totalSeats - reservedSeats,
             totalSeats - reservedSeats - unavailableSeats,
+            quotas.Sum(quota => quota.AvailableSeats),
+            reservedSeats,
+            quotas.Sum(quota => quota.AvailableSeats - quota.UsedSeats),
+            reservationCount,
             userRows.Select(row => new UserQuotaStatistics(
                 row.UserId,
                 row.Name,
@@ -677,6 +683,10 @@ public sealed class ReservationsController(
         int ReservedSeats,
         int UnreservedSeats,
         int UserBookableSeats,
+        int AllocatedQuotaSeats,
+        int UsedQuotaSeats,
+        int RemainingQuotaSeats,
+        int ReservationCount,
         IReadOnlyList<UserQuotaStatistics> Users);
 
     public sealed record UserQuotaStatistics(

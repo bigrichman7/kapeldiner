@@ -160,6 +160,32 @@ has the same effect as cancellation. A reservation record exists only while
 the selection is non-empty. A request that changes no seats may return success
 without changing quota usage.
 
+`GET /api/admin/events` returns an array in `data` and supports history
+discovery with these query parameters:
+
+- `period=all|upcoming|past` (default `all`). `upcoming` means `startAt` is
+  later than the current time; `past` means `endAt` is at or before the
+  current time. An in-progress event is in neither period.
+- `search` matches a substring in title or description; case matching follows
+  the database collation.
+- `status=draft|published|completed|cancelled` filters by event status.
+- `from` and `to` are inclusive ISO-8601 timestamp bounds on event `startAt`.
+- `sortBy=startAt|endAt|title` (default `startAt`) and
+  `sortOrder=asc|desc` (default `asc`) control ordering. Event ID ascending is
+  the stable tie-breaker.
+- `page` (default `1`) and `pageSize` (default `50`, maximum `100`) paginate
+  the result. `X-Total-Count`, `X-Page`, and `X-Page-Size` response headers
+  describe the page while preserving the existing array response shape.
+
+The administrator statistics response keeps event-wide physical seat totals
+separate from quota totals. It includes `totalSeats`, `reservedSeats`,
+`unreservedSeats`, `userBookableSeats`, `allocatedQuotaSeats`,
+`usedQuotaSeats`, `remainingQuotaSeats`, and `reservationCount`, along with
+each user's allocated, used, and remaining quota. Reservation, seat, quota,
+and statistics GET endpoints remain available for completed events. All
+reservation writes are rejected at the event start; completed events are
+read-only, including reservation edits and deletions.
+
 The quota endpoint accepts
 `{"availableSeats": 5, "cancelSeatIds": ["..."]}`. If the new capacity is
 less than current usage, `cancelSeatIds` must explicitly select that user's
