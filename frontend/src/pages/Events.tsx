@@ -5,7 +5,7 @@ import { SeatLegend, SeatMap } from '../components/SeatMap';
 import { PageFrame } from '../App';
 import { eventInputToIso, formatEventDate, formatEventDateInput, statusLabel } from '../format';
 import type {
-  AdminSeat, EventItem, EventStatistics, Quota, Reservation, UserProfile, UserSeat,
+  AdminSeat, EventItem, EventNotificationSummary, EventPublishResponse, EventStatistics, Quota, Reservation, UserProfile, UserSeat,
 } from '../types';
 import { Alert, Button, EmptyState, ErrorMessage, FieldError, Loading } from '../ui';
 
@@ -232,6 +232,7 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [seatMode, setSeatMode] = useState<'booking' | 'designation'>('booking');
+  const [publicationNotifications, setPublicationNotifications] = useState<EventNotificationSummary | null>(null);
 
   async function load() {
     setLoading(true);
@@ -364,8 +365,16 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     if (action === 'cancel' && !window.confirm('Отменить это мероприятие?')) return;
     setBusy(true);
     setError(null);
+    setMessage('');
+    setPublicationNotifications(null);
     try {
-      await api(`/api/admin/events/${eventId}/${action}`, { method: 'POST' });
+      if (action === 'publish') {
+        const result = await api<EventPublishResponse>(`/api/admin/events/${eventId}/publish`, { method: 'POST' });
+        setPublicationNotifications(result.notifications);
+      } else {
+        await api(`/api/admin/events/${eventId}/cancel`, { method: 'POST' });
+        setMessage('Мероприятие отменено.');
+      }
       await load();
     } catch (reason) {
       setError(reason);
@@ -404,6 +413,26 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
       </div>
       {Boolean(error) && <ErrorMessage error={error} />}
       {message && <Alert variant="success">{message}</Alert>}
+      {admin && publicationNotifications && (
+        <Alert variant={publicationNotifications.failedCount > 0 ? 'error' : 'success'}>
+          {publicationNotifications.failedCount > 0 ? (
+            <>
+              <p>Мероприятие опубликовано. Отправлено писем: {publicationNotifications.sentCount} из {publicationNotifications.recipientCount}.</p>
+              <p>Не удалось доставить уведомления:</p>
+              <ul>{publicationNotifications.failures.map((failure) => (
+                <li key={failure.userId}>
+                  {failure.name ?? failure.email ?? failure.userId}
+                  {failure.email && ` (${failure.email})`}: {failure.message}
+                </li>
+              ))}</ul>
+            </>
+          ) : publicationNotifications.recipientCount === 0 ? (
+            'Мероприятие опубликовано. Квот для уведомления участников нет.'
+          ) : (
+            `Мероприятие опубликовано. Уведомления отправлены: ${publicationNotifications.sentCount}.`
+          )}
+        </Alert>
+      )}
       {admin && <div className="tabs" role="tablist" aria-label="Разделы мероприятия">
         <button className={tab === 'overview' ? 'tab active' : 'tab'} role="tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')}>Обзор</button>
         <button className={tab === 'seats' ? 'tab active' : 'tab'} role="tab" aria-selected={tab === 'seats'} onClick={() => setTab('seats')}>Зал и бронирования</button>

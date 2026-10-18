@@ -124,14 +124,21 @@ Open the local URL printed by Vite. Its `/api` proxy forwards requests to the
 HTTPS Development API at `https://localhost:7282`; see the
 [frontend guide](../frontend/README.md) for frontend checks and account notes.
 
-### Optional email for local user creation
+### Optional email delivery
 
 Creating an account through `POST /api/admin/users` sends a generated
-permanent password by SMTP. SMTP is not needed to start the API or exercise
-the other endpoints. Without SMTP, account creation returns
+permanent password by SMTP. Publishing a draft event also sends a notification
+to each user with a positive quota; the message includes the event title,
+Moscow start time, allocated places, and the placeholder booking site
+`https://kapeldiner.org`. The publish response reports each failed delivery,
+but email failures do not undo publication. A published event cannot be
+published again, so retries of the publish request do not resend notices.
+SMTP is not needed to start the API or exercise the other endpoints. Without
+SMTP, account creation returns
 `503 EMAIL_NOT_CONFIGURED`; if delivery fails it returns
 `502 EMAIL_DELIVERY_FAILED`, and in both cases the database insert is rolled
-back. Configure local SMTP in User Secrets if you need to test that operation:
+back. Event publication still succeeds and reports the email failures.
+Configure local SMTP in User Secrets if you need to test email delivery:
 
 ```powershell
 dotnet user-secrets set "Email:Smtp:Host" "<local-smtp-host>" --project backend\KapeldinerService\src\KapeldinerService.Web
@@ -195,7 +202,7 @@ described above.
 | `GET` | `/api/admin/events/{eventId}` | Administrator | Read event details, including quotas. |
 | `POST` | `/api/admin/events` | Administrator | Create a draft event with optional initial quotas. |
 | `PATCH` | `/api/admin/events/{eventId}` | Administrator | Update details and optional-row setting. |
-| `POST` | `/api/admin/events/{eventId}/publish` | Administrator | Publish a draft event. |
+| `POST` | `/api/admin/events/{eventId}/publish` | Administrator | Publish a draft event and notify users with positive quotas. |
 | `POST` | `/api/admin/events/{eventId}/cancel` | Administrator | Cancel a draft or published event. |
 | `GET` | `/api/admin/events/{eventId}/seats` | Administrator | Read seats, designation, booking state, and occupant. |
 | `PUT` | `/api/admin/events/{eventId}/seats/{seatId}/designation` | Administrator | Set `vip`, `organization`, or `none`. |
@@ -209,6 +216,13 @@ described above.
 test endpoint. These operational/test endpoints, health-check output,
 automatic model-binding errors, and unhandled server exceptions are not
 covered by the API envelope guarantee.
+
+`POST /api/admin/events/{eventId}/publish` returns the published event and a
+`notifications` summary (`recipientCount`, `sentCount`, `failedCount`, and
+`failures`). Each failure includes the user ID, available name/email, error
+code, and a Russian explanation. Quotas without a positive seat count do not
+receive a notice; quotas for a missing user or an invalid email are reported as
+failed notifications.
 
 ## Request and response examples
 

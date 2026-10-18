@@ -37,6 +37,26 @@ export interface EventItem {
   enableAdditionalRow12A: boolean;
 }
 
+export interface EventNotificationFailure {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  code: string;
+  message: string;
+}
+
+export interface EventNotificationSummary {
+  recipientCount: number;
+  sentCount: number;
+  failedCount: number;
+  failures: EventNotificationFailure[];
+}
+
+export interface EventPublishResponse {
+  event: EventItem;
+  notifications: EventNotificationSummary;
+}
+
 export interface UserSeat {
   seatId: string;
   available: boolean;
