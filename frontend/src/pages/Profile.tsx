@@ -6,7 +6,7 @@ import type { UserProfile } from '../types';
 import { Alert, Button, ErrorMessage, FieldError, Loading, PageHeading } from '../ui';
 
 export function ProfilePage() {
-  const { setSession } = useAuth();
+  const { session, setSession } = useAuth();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [login, setLogin] = useState('');
@@ -45,6 +45,7 @@ export function ProfilePage() {
         window.setTimeout(() => navigate('/login', { replace: true }), 1200);
       } else {
         setProfile(result.profile);
+        if (session) setSession({ ...session, name: result.profile.name });
         setSuccess('Профиль сохранён.');
       }
     } catch (reason) {

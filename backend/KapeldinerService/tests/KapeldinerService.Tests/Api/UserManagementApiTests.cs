@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Data.Sqlite;
@@ -72,6 +73,7 @@ public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFact
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Equal(AuthRoles.User, user.Role);
+        Assert.Matches(@"^[A-Za-z0-9_-]{8}$", _factory.EmailSender.LastPassword!);
         Assert.NotEqual(_factory.EmailSender.LastPassword, user.PasswordHash);
         Assert.Equal(PasswordVerificationResult.Success,
             passwordHasher.VerifyHashedPassword(user, user.PasswordHash, _factory.EmailSender.LastPassword!));
@@ -96,6 +98,45 @@ public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFact
         Assert.Equal(HttpStatusCode.Conflict, duplicateEmailResponse.StatusCode);
         Assert.Equal("EMAIL_ALREADY_EXISTS",
             duplicateEmailBody.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task CurrentSessionReturnsTheLatestProfileNameInsteadOfTheLogin()
+    {
+        await _factory.EnsureDatabaseCreatedAsync();
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            if (!await dbContext.AuthUsers.AnyAsync(user => user.Id == Guid.Parse(ExistingUserId)))
+            {
+                dbContext.AuthUsers.Add(new AuthUser
+                {
+                    Id = Guid.Parse(ExistingUserId),
+                    Login = "member",
+                    NormalizedLogin = "MEMBER",
+                    Name = "Member Profile Name",
+                    Email = "member@example.com",
+                    NormalizedEmail = "MEMBER@EXAMPLE.COM",
+                    PasswordHash = "not-used",
+                    Role = AuthRoles.User,
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+                await dbContext.SaveChangesAsync();
+            }
+        }
+        await using KapeldinerServiceDbContext verificationContext = await _factory.CreateDbContextAsync();
+        AuthUser currentUser = await verificationContext.AuthUsers.SingleAsync(
+            user => user.Id == Guid.Parse(ExistingUserId));
+
+        using var sessionRequest = new HttpRequestMessage(HttpMethod.Get, "/api/auth/session");
+        sessionRequest.Headers.Add(TestRoleHeader, AuthRoles.User);
+        using HttpResponseMessage sessionResponse = await _client.SendAsync(sessionRequest);
+        using JsonDocument sessionBody = await JsonDocument.ParseAsync(await sessionResponse.Content.ReadAsStreamAsync());
+        JsonElement session = sessionBody.RootElement.GetProperty("data");
+
+        Assert.Equal(HttpStatusCode.OK, sessionResponse.StatusCode);
+        Assert.Equal(currentUser.Login, session.GetProperty("login").GetString());
+        Assert.Equal(currentUser.Name, session.GetProperty("name").GetString());
+        Assert.NotEqual(currentUser.Login, currentUser.Name);
     }
 
     [Fact]
@@ -280,6 +321,14 @@ public sealed class UserManagementApiFactory : WebApplicationFactory<Program>
     {
         builder.ConfigureTestServices(services =>
         {
+            ServiceDescriptor? adminBootstrapper = services.FirstOrDefault(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService)
+                && Equals(descriptor.ImplementationType, typeof(AdminBootstrapper)));
+            if (adminBootstrapper is not null)
+            {
+                services.Remove(adminBootstrapper);
+            }
+
             services.RemoveAll<IDbContextFactory<KapeldinerServiceDbContext>>();
             services.RemoveAll<DbContextOptions<KapeldinerServiceDbContext>>();
             services.RemoveAll<IDbContextOptionsConfiguration<KapeldinerServiceDbContext>>();

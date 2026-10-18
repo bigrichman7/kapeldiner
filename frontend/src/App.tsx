@@ -107,8 +107,8 @@ function AppLayout() {
     <div className="app-frame">
       <header className="topbar">
         <Link className="brand" to="/">
-          <span className="brand-mark" aria-hidden="true">K</span>
-          <span>kapeldiner</span>
+          <span className="brand-mark" aria-hidden="true">К</span>
+          <span>Капельдинер</span>
         </Link>
         <nav className="main-nav" aria-label="Основная навигация">
           {session?.role === 'Administrator' ? (
@@ -119,7 +119,7 @@ function AppLayout() {
           ) : <Link to="/events">Мероприятия</Link>}
         </nav>
         <div className="account">
-          <Link className="account-name" to="/profile">{session?.login}</Link>
+          <Link className="account-name" to="/profile">{session?.name}</Link>
           <Button variant="quiet" onClick={handleLogout}>Выйти</Button>
         </div>
       </header>
@@ -127,7 +127,7 @@ function AppLayout() {
         {error && <Alert variant="error">{error}</Alert>}
         <Outlet />
       </main>
-      <footer className="footer">Kapeldiner <span>·</span> управление событиями и местами</footer>
+      <footer className="footer">Капельдинер <span>·</span> управление событиями и местами</footer>
     </div>
   );
 }
@@ -167,7 +167,7 @@ function LoginPage() {
     <main className="login-page">
       <section className="login-card">
         <Link className="brand login-brand" to="/">
-          <span className="brand-mark" aria-hidden="true">K</span><span>kapeldiner</span>
+          <span className="brand-mark" aria-hidden="true">К</span><span>Капельдинер</span>
         </Link>
         <p className="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</p>
         <h1>Войти в аккаунт</h1>

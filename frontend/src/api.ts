@@ -68,7 +68,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 
 export async function signIn(login: string, password: string) {
   await refreshCsrfToken();
-  const session = await api<{ id: string; login: string; role: string }>('/api/auth/login', {
+  const session = await api<{ id: string; login: string; name: string; role: string }>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ login, password }),
   });

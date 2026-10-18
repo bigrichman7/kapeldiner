@@ -84,7 +84,7 @@ app.UseMiddleware<CsrfValidationMiddleware>();
 app.UseAuthorization();
 
 // Minimal API endpoints
-app.MapGet("/", () => "KapeldinerService is running!");
+app.MapGet("/", () => "Капельдинер: сервис работает!");
 
 app.MapHealthChecks("/api/health");
 

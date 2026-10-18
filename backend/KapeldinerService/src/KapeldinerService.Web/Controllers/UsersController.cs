@@ -126,7 +126,7 @@ public sealed partial class UsersController(
             return duplicateError;
         }
 
-        string password = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
+        string password = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(6));
         var user = new AuthUser
         {
             Id = Guid.NewGuid(),

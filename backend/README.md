@@ -139,7 +139,7 @@ dotnet user-secrets set "Email:Smtp:Port" "<local-smtp-port>" --project backend\
 dotnet user-secrets set "Email:Smtp:FromAddress" "<sender-address>" --project backend\KapeldinerService\src\KapeldinerService.Web
 ```
 
-Optional `Email:Smtp:FromName` defaults to `Kapeldiner`. SMTP authentication
+Optional `Email:Smtp:FromName` defaults to `Капельдинер`. SMTP authentication
 is either disabled or configured with both `Email:Smtp:UserName` and
 `Email:Smtp:Password`; STARTTLS is always enabled. Do not use a production
 mailbox or credentials for local development. For the full credential and

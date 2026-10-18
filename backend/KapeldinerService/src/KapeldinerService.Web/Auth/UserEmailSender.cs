@@ -49,7 +49,7 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
             return EmailSendResult.NotConfigured;
         }
 
-        string fromName = configuration["Email:Smtp:FromName"] ?? "Kapeldiner";
+        string fromName = configuration["Email:Smtp:FromName"] ?? "Капельдинер";
         string body = $"Здравствуйте, {name}!\n\n"
             + $"Для входа используйте логин: {login}\n"
             + $"Пароль: {password}\n\n"
@@ -57,7 +57,7 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
 
         using var message = new MailMessage
         {
-            Subject = "Доступ к Kapeldiner",
+            Subject = "Доступ к Капельдинеру",
             Body = body,
             BodyEncoding = Encoding.UTF8,
             SubjectEncoding = Encoding.UTF8
