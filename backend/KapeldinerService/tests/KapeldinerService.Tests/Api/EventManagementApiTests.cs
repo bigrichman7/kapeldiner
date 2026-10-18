@@ -92,6 +92,7 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
         using HttpResponseMessage publishResponse = await SendAsAdminAsync(
             HttpMethod.Post,
             $"/api/admin/events/{eventId:D}/publish");
+        using JsonDocument publishBody = await JsonDocument.ParseAsync(await publishResponse.Content.ReadAsStreamAsync());
         using HttpResponseMessage visibleList = await SendAsUserAsync(HttpMethod.Get, "/api/events");
         using JsonDocument visibleListBody =
             await JsonDocument.ParseAsync(await visibleList.Content.ReadAsStreamAsync());
@@ -102,6 +103,22 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
         Assert.Equal(5, visibleEvent.GetProperty("myQuota").GetProperty("availableSeats").GetInt32());
         Assert.Equal(0, visibleEvent.GetProperty("myQuota").GetProperty("usedSeats").GetInt32());
         Assert.Equal(5, visibleEvent.GetProperty("myQuota").GetProperty("remainingSeats").GetInt32());
+        JsonElement notificationSummary = publishBody.RootElement.GetProperty("data").GetProperty("notifications");
+        Assert.Equal(1, notificationSummary.GetProperty("recipientCount").GetInt32());
+        Assert.Equal(1, notificationSummary.GetProperty("sentCount").GetInt32());
+        Assert.Equal(0, notificationSummary.GetProperty("failedCount").GetInt32());
+        EventQuotaEmailRequest sentEmail = Assert.Single(_factory.EmailSender.EventQuotaEmails);
+        Assert.Equal("event-user@example.com", sentEmail.Email);
+        Assert.Equal("Event User", sentEmail.Name);
+        Assert.Equal("Opening performance", sentEmail.EventTitle);
+        Assert.Equal(startAt.ToOffset(TimeSpan.FromHours(3)), sentEmail.StartAt);
+        Assert.Equal(5, sentEmail.AvailableSeats);
+
+        using HttpResponseMessage repeatedPublish = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        Assert.Equal(HttpStatusCode.Conflict, repeatedPublish.StatusCode);
+        Assert.Single(_factory.EmailSender.EventQuotaEmails);
 
         using HttpResponseMessage adminDetail = await SendAsAdminAsync(
             HttpMethod.Get,
@@ -130,6 +147,79 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     }
 
     [Fact]
+    public async Task FailedOrInvalidQuotaNotificationsDoNotUndoPublicationAndAreReported()
+    {
+        await PrepareDatabaseAsync();
+        Guid secondUserId = Guid.NewGuid();
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            AuthUser firstUser = await dbContext.AuthUsers.SingleAsync(user => user.Id == ExistingUserId);
+            firstUser.Email = " ";
+            dbContext.AuthUsers.Add(new AuthUser
+            {
+                Id = secondUserId,
+                Login = "notification-user",
+                NormalizedLogin = "NOTIFICATION-USER",
+                Name = "Notification User",
+                Email = "notification-user@example.com",
+                NormalizedEmail = "NOTIFICATION-USER@EXAMPLE.COM",
+                PasswordHash = "not-used",
+                Role = AuthRoles.User,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+            await dbContext.SaveChangesAsync();
+        }
+        _factory.EmailSender.EventQuotaResult = EmailSendResult.Failed;
+
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = "Notification failure performance",
+                startAt,
+                endAt = startAt.AddHours(1),
+                quotas = new[]
+                {
+                    new { userId = ExistingUserId, availableSeats = 3 },
+                    new { userId = secondUserId, availableSeats = 4 }
+                }
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+
+        using HttpResponseMessage publishResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        using JsonDocument publishBody = await JsonDocument.ParseAsync(await publishResponse.Content.ReadAsStreamAsync());
+        JsonElement notificationSummary = publishBody.RootElement.GetProperty("data").GetProperty("notifications");
+        string[] failureCodes = notificationSummary.GetProperty("failures").EnumerateArray()
+            .Select(failure => failure.GetProperty("code").GetString()!)
+            .ToArray();
+
+        Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        Assert.Equal(2, notificationSummary.GetProperty("recipientCount").GetInt32());
+        Assert.Equal(0, notificationSummary.GetProperty("sentCount").GetInt32());
+        Assert.Equal(2, notificationSummary.GetProperty("failedCount").GetInt32());
+        Assert.Contains("EMAIL_INVALID", failureCodes);
+        Assert.Contains("EMAIL_DELIVERY_FAILED", failureCodes);
+        Assert.Equal("notification-user@example.com", Assert.Single(_factory.EmailSender.EventQuotaEmails).Email);
+
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            EventItem publishedEvent = await dbContext.EventItems.SingleAsync(item => item.Id == new EventItemId(eventId));
+            Assert.Equal(StatusEvent.Published, publishedEvent.Status);
+        }
+
+        using HttpResponseMessage repeatedPublish = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        Assert.Equal(HttpStatusCode.Conflict, repeatedPublish.StatusCode);
+        Assert.Single(_factory.EmailSender.EventQuotaEmails);
+    }
+
+    [Fact]
     public async Task UserCannotSeePublishedEventWithoutPositiveQuota()
     {
         await PrepareDatabaseAsync();
@@ -150,11 +240,16 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
         using HttpResponseMessage publishResponse = await SendAsAdminAsync(
             HttpMethod.Post,
             $"/api/admin/events/{eventId:D}/publish");
+        using JsonDocument publishBody = await JsonDocument.ParseAsync(await publishResponse.Content.ReadAsStreamAsync());
         using HttpResponseMessage detailResponse = await SendAsUserAsync(HttpMethod.Get, $"/api/events/{eventId:D}");
         using HttpResponseMessage listResponse = await SendAsUserAsync(HttpMethod.Get, "/api/events");
         using JsonDocument listBody = await JsonDocument.ParseAsync(await listResponse.Content.ReadAsStreamAsync());
 
         Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        JsonElement notifications = publishBody.RootElement.GetProperty("data").GetProperty("notifications");
+        Assert.Equal(0, notifications.GetProperty("recipientCount").GetInt32());
+        Assert.Equal(0, notifications.GetProperty("sentCount").GetInt32());
+        Assert.Empty(_factory.EmailSender.EventQuotaEmails);
         Assert.Equal(HttpStatusCode.NotFound, detailResponse.StatusCode);
         Assert.Empty(listBody.RootElement.GetProperty("data").EnumerateArray());
     }
@@ -716,6 +811,8 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
 
     private async Task PrepareDatabaseAsync()
     {
+        _factory.EmailSender.EventQuotaResult = EmailSendResult.Sent;
+        _factory.EmailSender.ClearEventQuotaEmails();
         await _factory.EnsureDatabaseCreatedAsync();
         await using KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync();
         if (!await dbContext.AuthUsers.AnyAsync(user => user.Id == ExistingUserId))

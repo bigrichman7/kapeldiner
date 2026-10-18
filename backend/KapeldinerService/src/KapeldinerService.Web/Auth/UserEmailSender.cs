@@ -13,6 +13,14 @@ public interface IUserEmailSender
         string login,
         string password,
         CancellationToken cancellationToken);
+
+    Task<EmailSendResult> SendEventQuotaAsync(
+        string email,
+        string name,
+        string eventTitle,
+        DateTimeOffset startAt,
+        int availableSeats,
+        CancellationToken cancellationToken);
 }
 
 public enum EmailSendResult
@@ -29,6 +37,39 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
         string name,
         string login,
         string password,
+        CancellationToken cancellationToken)
+    {
+        string body = $"Здравствуйте, {name}!\n\n"
+            + $"Для входа используйте логин: {login}\n"
+            + $"Пароль: {password}\n\n"
+            + "Это постоянный пароль для учетной записи.";
+
+        return await SendAsync(email, "Доступ к Капельдинеру", body, cancellationToken);
+    }
+
+    public Task<EmailSendResult> SendEventQuotaAsync(
+        string email,
+        string name,
+        string eventTitle,
+        DateTimeOffset startAt,
+        int availableSeats,
+        CancellationToken cancellationToken)
+    {
+        string eventDate = startAt.ToString("dd.MM.yyyy 'в' HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        string subjectTitle = eventTitle.Replace('\r', ' ').Replace('\n', ' ');
+        string body = $"Здравствуйте, {name}!\n\n"
+            + $"Опубликовано новое мероприятие «{eventTitle}», которое состоится {eventDate} (время московское).\n"
+            + $"Для вас выделено мест: {availableSeats}.\n\n"
+            + "Забронировать места можно на сайте: https://kapeldiner.org\n\n"
+            + "С уважением,\nКапельдинер";
+
+        return SendAsync(email, $"Новое мероприятие «{subjectTitle}» — ваша квота", body, cancellationToken);
+    }
+
+    private async Task<EmailSendResult> SendAsync(
+        string email,
+        string subject,
+        string body,
         CancellationToken cancellationToken)
     {
         string? host = configuration["Email:Smtp:Host"];
@@ -50,14 +91,9 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
         }
 
         string fromName = configuration["Email:Smtp:FromName"] ?? "Капельдинер";
-        string body = $"Здравствуйте, {name}!\n\n"
-            + $"Для входа используйте логин: {login}\n"
-            + $"Пароль: {password}\n\n"
-            + "Это постоянный пароль для учетной записи.";
-
         using var message = new MailMessage
         {
-            Subject = "Доступ к Капельдинеру",
+            Subject = subject,
             Body = body,
             BodyEncoding = Encoding.UTF8,
             SubjectEncoding = Encoding.UTF8

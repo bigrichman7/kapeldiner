@@ -19,4 +19,20 @@ public sealed class UserEmailSenderTests
 
         Assert.Equal(EmailSendResult.NotConfigured, result);
     }
+
+    [Fact]
+    public async Task EventQuotaEmailUsesExistingSmtpConfiguration()
+    {
+        var sender = new SmtpUserEmailSender(new ConfigurationBuilder().Build());
+
+        EmailSendResult result = await sender.SendEventQuotaAsync(
+            "user@example.com",
+            "Test User",
+            "Test event",
+            new DateTimeOffset(2026, 10, 20, 18, 30, 0, TimeSpan.FromHours(3)),
+            4,
+            CancellationToken.None);
+
+        Assert.Equal(EmailSendResult.NotConfigured, result);
+    }
 }
