@@ -1,4 +1,4 @@
-# Kapeldiner frontend
+# Капельдинер — фронтенд
 
 The frontend is a small React + TypeScript application. It uses the existing
 ASP.NET Core API, session cookies, and the API's CSRF protection. There are no

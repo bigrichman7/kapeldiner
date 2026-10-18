@@ -93,18 +93,31 @@ public sealed class AuthController(
                 AllowRefresh = true
             });
 
-        return Ok(ApiResponse.Ok(new { id = user.Id, login = user.Login, role = user.Role }));
+        return Ok(ApiResponse.Ok(new { id = user.Id, login = user.Login, name = user.Name, role = user.Role }));
     }
 
     [HttpGet("session")]
     [Authorize]
-    public IActionResult GetCurrentSession()
+    public async Task<IActionResult> GetCurrentSession(CancellationToken cancellationToken)
     {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out Guid userId))
+        {
+            return Unauthorized(ApiResponse.Failure<object>("UNAUTHENTICATED", "Требуется повторный вход."));
+        }
+
+        await using KapeldinerServiceDbContext dbContext = await contextFactory.CreateDbContextAsync(cancellationToken);
+        AuthUser? user = await dbContext.AuthUsers.SingleOrDefaultAsync(account => account.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            return Unauthorized(ApiResponse.Failure<object>("UNAUTHENTICATED", "Требуется повторный вход."));
+        }
+
         return Ok(ApiResponse.Ok(new
         {
-            id = User.FindFirstValue(ClaimTypes.NameIdentifier),
-            login = User.Identity?.Name,
-            role = User.FindFirstValue(ClaimTypes.Role)
+            id = user.Id,
+            login = user.Login,
+            name = user.Name,
+            role = user.Role
         }));
     }
 

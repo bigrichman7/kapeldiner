@@ -3,6 +3,7 @@ export type Role = 'Administrator' | 'User';
 export interface Session {
   id: string;
   login: string;
+  name: string;
   role: Role;
 }
 

@@ -13,7 +13,7 @@ authenticated users can read and update their own profile.
 |---|---|---|---|
 | `GET` | `/api/auth/csrf` | Anonymous | Issue the antiforgery cookie and request token. |
 | `POST` | `/api/auth/login` | Anonymous + CSRF token | Authenticate by login and password. |
-| `GET` | `/api/auth/session` | Authenticated | Return the current user's id, login, and role. |
+| `GET` | `/api/auth/session` | Authenticated | Return the current user's id, login, profile name, and role. |
 | `POST` | `/api/auth/logout` | Authenticated + CSRF token | Delete the server session and expire the cookie. |
 | `GET` | `/api/admin/session` | Administrator | Example route protected by the administrator policy. |
 | `GET` | `/api/users/me` | Authenticated | Read the current user's profile. |
@@ -42,10 +42,11 @@ through a deployment secret manager or User Secrets, never tracked settings.
 If SMTP is missing, creation returns `503 EMAIL_NOT_CONFIGURED`; if sending
 fails, it returns `502 EMAIL_DELIVERY_FAILED`. In either case the user insert
 is rolled back and no account is created. The generated permanent password is
-random, is stored only as an ASP.NET Core Identity password hash, and is never
-logged or returned by the API. The email sends it as plaintext, which remains
-a material account-compromise risk; use a one-time password setup link instead
-when the product requirement permits.
+a cryptographically random 8-character Base64Url string, is stored only as an
+ASP.NET Core Identity password hash, and is never logged or returned by the
+API. The email sends it as plaintext, which remains a material
+account-compromise risk; use a one-time password setup link instead when the
+product requirement permits.
 SMTP delivery and PostgreSQL commit cannot be one atomic operation: in the
 rare case that the mail server accepts a message but the database commit then
 fails, the recipient may receive credentials for an account that was not
