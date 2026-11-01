@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Mail;
 using System.Security.Claims;
 using KapeldinerService.Domain.Common.Errors;
 using KapeldinerService.Domain.Events;
@@ -18,10 +19,17 @@ namespace KapeldinerService.Web.Controllers;
 public sealed class EventsController(
     IDbContextFactory<KapeldinerServiceDbContext> contextFactory,
     EventCompletionService completionService,
-    TimeProvider timeProvider) : ControllerBase
+    TimeProvider timeProvider,
+    IUserEmailSender emailSender,
+    ILogger<EventsController> logger) : ControllerBase
 {
     private const int MaximumQuotaSeats = 643;
     private static readonly TimeZoneInfo EventTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Europe/Moscow");
+    private static readonly Action<ILogger, Guid, Guid, string, Exception?> LogNotificationFailure =
+        LoggerMessage.Define<Guid, Guid, string>(
+            LogLevel.Warning,
+            new EventId(1, nameof(LogNotificationFailure)),
+            "Event email delivery failed for event {EventId}, user {UserId}: {ErrorCode}");
 
     [HttpGet("admin/events")]
     [Authorize(Policy = "AdministratorOnly")]
@@ -260,13 +268,146 @@ public sealed class EventsController(
 
     [HttpPost("admin/events/{eventId:guid}/publish")]
     [Authorize(Policy = "AdministratorOnly")]
-    public Task<IActionResult> PublishEvent(Guid eventId, CancellationToken cancellationToken) =>
-        ChangeStatusAsync(eventId, (eventItem, nowUtc) => eventItem.Publish(nowUtc), cancellationToken);
+    public async Task<IActionResult> PublishEvent(Guid eventId, CancellationToken cancellationToken)
+    {
+        await completionService.CompleteEndedEventsAsync(cancellationToken);
+        await using KapeldinerServiceDbContext dbContext =
+            await contextFactory.CreateDbContextAsync(cancellationToken);
+        EventItem? eventItem = await dbContext.EventItems
+            .SingleOrDefaultAsync(item => item.Id == new EventItemId(eventId), cancellationToken);
+        if (eventItem is null)
+        {
+            return NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."));
+        }
+
+        DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        var publishResult = eventItem.Publish(nowUtc);
+        if (publishResult.IsFailure)
+        {
+            return DomainFailure(publishResult.Error);
+        }
+
+        int transitioned = await dbContext.EventItems
+            .Where(item => item.Id == new EventItemId(eventId) && item.Status == StatusEvent.Draft)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.Status, StatusEvent.Published),
+                cancellationToken);
+        if (transitioned == 0)
+        {
+            return Conflict(ApiResponse.Failure<object>(
+                "EVENT_NOT_PUBLISHABLE",
+                "Опубликовать можно только черновик мероприятия."));
+        }
+
+        EventNotificationSummary notifications =
+            await SendQuotaNotificationsAsync(eventItem, cancelled: false, cancellationToken);
+
+        return Ok(ApiResponse.Ok(new PublishEventResponse(
+            ToResponse(eventItem, nowUtc, includeQuotas: false),
+            notifications)));
+    }
 
     [HttpPost("admin/events/{eventId:guid}/cancel")]
     [Authorize(Policy = "AdministratorOnly")]
-    public Task<IActionResult> CancelEvent(Guid eventId, CancellationToken cancellationToken) =>
-        ChangeStatusAsync(eventId, (eventItem, nowUtc) => eventItem.Cancel(nowUtc), cancellationToken);
+    public async Task<IActionResult> CancelEvent(Guid eventId, CancellationToken cancellationToken)
+    {
+        await completionService.CompleteEndedEventsAsync(cancellationToken);
+        await using KapeldinerServiceDbContext dbContext =
+            await contextFactory.CreateDbContextAsync(cancellationToken);
+        EventItem? eventItem = await dbContext.EventItems
+            .SingleOrDefaultAsync(item => item.Id == new EventItemId(eventId), cancellationToken);
+        if (eventItem is null)
+        {
+            return NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."));
+        }
+
+        DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        var cancelResult = eventItem.Cancel(nowUtc);
+        if (cancelResult.IsFailure)
+        {
+            return DomainFailure(cancelResult.Error);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        EventNotificationSummary notifications =
+            await SendQuotaNotificationsAsync(eventItem, cancelled: true, cancellationToken);
+
+        return Ok(ApiResponse.Ok(new EventCancellationResponse(
+            ToResponse(eventItem, nowUtc, includeQuotas: false),
+            notifications)));
+    }
+
+    private async Task<EventNotificationSummary> SendQuotaNotificationsAsync(
+        EventItem eventItem,
+        bool cancelled,
+        CancellationToken cancellationToken)
+    {
+        EventQuota[] quotas;
+        Dictionary<Guid, AuthUser> users;
+        await using (KapeldinerServiceDbContext dbContext =
+                     await contextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            quotas = await dbContext.EventQuotas
+                .AsNoTracking()
+                .Where(quota => quota.EventItemId == eventItem.Id && quota.AvailableSeats > 0)
+                .ToArrayAsync(cancellationToken);
+            users = await dbContext.AuthUsers
+                .Where(user => user.Role == AuthRoles.User && quotas.Select(quota => quota.UserId).Contains(user.Id))
+                .ToDictionaryAsync(user => user.Id, cancellationToken);
+        }
+
+        var failures = new List<EventNotificationFailure>();
+        int sentCount = 0;
+        foreach (EventQuota quota in quotas)
+        {
+            if (!users.TryGetValue(quota.UserId, out AuthUser? user))
+            {
+                failures.Add(new EventNotificationFailure(
+                    quota.UserId, null, null, "USER_NOT_FOUND", "Пользователь с выделенной квотой не найден."));
+                continue;
+            }
+
+            if (!MailAddress.TryCreate(user.Email, out _))
+            {
+                failures.Add(new EventNotificationFailure(
+                    user.Id, user.Name, user.Email, "EMAIL_INVALID", "У пользователя не указан корректный адрес электронной почты."));
+                continue;
+            }
+
+            EmailSendResult sendResult = cancelled
+                ? await emailSender.SendEventCancelledAsync(
+                    user.Email,
+                    user.Name,
+                    eventItem.Title!,
+                    eventItem.Description,
+                    AsMoscowOffset(eventItem.StardAt),
+                    AsMoscowOffset(eventItem.EndAt),
+                    quota.AvailableSeats,
+                    cancellationToken)
+                : await emailSender.SendEventQuotaAsync(
+                    user.Email,
+                    user.Name,
+                    eventItem.Title!,
+                    AsMoscowOffset(eventItem.StardAt),
+                    quota.AvailableSeats,
+                    cancellationToken);
+            if (sendResult == EmailSendResult.Sent)
+            {
+                sentCount++;
+                continue;
+            }
+
+            string errorCode = sendResult == EmailSendResult.NotConfigured
+                ? "EMAIL_NOT_CONFIGURED"
+                : "EMAIL_DELIVERY_FAILED";
+            string errorMessage = sendResult == EmailSendResult.NotConfigured
+                ? "Отправка электронной почты не настроена."
+                : "Не удалось отправить письмо.";
+            failures.Add(new EventNotificationFailure(user.Id, user.Name, user.Email, errorCode, errorMessage));
+            LogNotificationFailure(logger, eventItem.Id.Value, user.Id, errorCode, null);
+        }
+
+        return new EventNotificationSummary(quotas.Length, sentCount, failures.Count, failures);
+    }
 
     [HttpGet("events")]
     [Authorize]
@@ -314,32 +455,6 @@ public sealed class EventsController(
         return eventItem is null || quota is null
             ? NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."))
             : Ok(ApiResponse.Ok(ToResponse(eventItem, timeProvider.GetUtcNow().UtcDateTime, quota)));
-    }
-
-    private async Task<IActionResult> ChangeStatusAsync(
-        Guid eventId,
-        Func<EventItem, DateTime, CSharpFunctionalExtensions.Result<EventItem, DomainError>> changeStatus,
-        CancellationToken cancellationToken)
-    {
-        await completionService.CompleteEndedEventsAsync(cancellationToken);
-        await using KapeldinerServiceDbContext dbContext =
-            await contextFactory.CreateDbContextAsync(cancellationToken);
-        EventItem? eventItem = await dbContext.EventItems
-            .SingleOrDefaultAsync(item => item.Id == new EventItemId(eventId), cancellationToken);
-        if (eventItem is null)
-        {
-            return NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."));
-        }
-
-        DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        var result = changeStatus(eventItem, nowUtc);
-        if (result.IsFailure)
-        {
-            return DomainFailure(result.Error);
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(ApiResponse.Ok(ToResponse(eventItem, nowUtc, includeQuotas: false)));
     }
 
     private IActionResult DomainFailure(DomainError error)
@@ -508,6 +623,27 @@ public sealed class EventsController(
         int UsedSeats,
         int RemainingSeats,
         Guid? UserId = null);
+
+    public sealed record PublishEventResponse(
+        EventResponse Event,
+        EventNotificationSummary Notifications);
+
+    public sealed record EventCancellationResponse(
+        EventResponse Event,
+        EventNotificationSummary Notifications);
+
+    public sealed record EventNotificationSummary(
+        int RecipientCount,
+        int SentCount,
+        int FailedCount,
+        IReadOnlyList<EventNotificationFailure> Failures);
+
+    public sealed record EventNotificationFailure(
+        Guid UserId,
+        string? Name,
+        string? Email,
+        string Code,
+        string Message);
 
     private sealed record NormalizedCreateEvent(
         string Title,

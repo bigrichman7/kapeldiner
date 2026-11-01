@@ -364,7 +364,21 @@ public sealed class TestUserEmailSender : IUserEmailSender
 {
     public EmailSendResult Result { get; set; } = EmailSendResult.Sent;
 
+    public EmailSendResult EventQuotaResult { get; set; } = EmailSendResult.Sent;
+
+    public EmailSendResult EventCancellationResult { get; set; } = EmailSendResult.Sent;
+
     public string? LastPassword { get; private set; }
+
+    public ICollection<EventQuotaEmailRequest> EventQuotaEmails { get; } =
+        new System.Collections.ObjectModel.Collection<EventQuotaEmailRequest>();
+
+    public ICollection<EventCancellationEmailRequest> EventCancellationEmails { get; } =
+        new System.Collections.ObjectModel.Collection<EventCancellationEmailRequest>();
+
+    public void ClearEventQuotaEmails() => EventQuotaEmails.Clear();
+
+    public void ClearEventCancellationEmails() => EventCancellationEmails.Clear();
 
     public Task<EmailSendResult> SendCredentialsAsync(
         string email,
@@ -376,7 +390,50 @@ public sealed class TestUserEmailSender : IUserEmailSender
         LastPassword = password;
         return Task.FromResult(Result);
     }
+
+    public Task<EmailSendResult> SendEventQuotaAsync(
+        string email,
+        string name,
+        string eventTitle,
+        DateTimeOffset startAt,
+        int availableSeats,
+        CancellationToken cancellationToken)
+    {
+        EventQuotaEmails.Add(new EventQuotaEmailRequest(email, name, eventTitle, startAt, availableSeats));
+        return Task.FromResult(EventQuotaResult);
+    }
+
+    public Task<EmailSendResult> SendEventCancelledAsync(
+        string email,
+        string name,
+        string eventTitle,
+        string? eventDescription,
+        DateTimeOffset startAt,
+        DateTimeOffset endAt,
+        int availableSeats,
+        CancellationToken cancellationToken)
+    {
+        EventCancellationEmails.Add(new EventCancellationEmailRequest(
+            email, name, eventTitle, eventDescription, startAt, endAt, availableSeats));
+        return Task.FromResult(EventCancellationResult);
+    }
 }
+
+public sealed record EventQuotaEmailRequest(
+    string Email,
+    string Name,
+    string EventTitle,
+    DateTimeOffset StartAt,
+    int AvailableSeats);
+
+public sealed record EventCancellationEmailRequest(
+    string Email,
+    string Name,
+    string EventTitle,
+    string? EventDescription,
+    DateTimeOffset StartAt,
+    DateTimeOffset EndAt,
+    int AvailableSeats);
 
 public sealed class UserManagementTestAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,

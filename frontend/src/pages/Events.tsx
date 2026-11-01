@@ -5,7 +5,7 @@ import { SeatLegend, SeatMap } from '../components/SeatMap';
 import { PageFrame } from '../App';
 import { eventInputToIso, formatEventDate, formatEventDateInput, statusLabel } from '../format';
 import type {
-  AdminSeat, EventItem, EventStatistics, Quota, Reservation, UserProfile, UserSeat,
+  AdminSeat, EventCancellationResponse, EventItem, EventNotificationSummary, EventPublishResponse, EventStatistics, Quota, Reservation, UserProfile, UserSeat,
 } from '../types';
 import { Alert, Button, EmptyState, ErrorMessage, FieldError, Loading } from '../ui';
 
@@ -232,6 +232,8 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [seatMode, setSeatMode] = useState<'booking' | 'designation'>('booking');
+  const [statusNotifications, setStatusNotifications] = useState<EventNotificationSummary | null>(null);
+  const [statusNotificationAction, setStatusNotificationAction] = useState<'publish' | 'cancel' | null>(null);
 
   async function load() {
     setLoading(true);
@@ -364,8 +366,18 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     if (action === 'cancel' && !window.confirm('Отменить это мероприятие?')) return;
     setBusy(true);
     setError(null);
+    setMessage('');
+    setStatusNotifications(null);
+    setStatusNotificationAction(null);
     try {
-      await api(`/api/admin/events/${eventId}/${action}`, { method: 'POST' });
+      if (action === 'publish') {
+        const result = await api<EventPublishResponse>(`/api/admin/events/${eventId}/publish`, { method: 'POST' });
+        setStatusNotifications(result.notifications);
+      } else {
+        const result = await api<EventCancellationResponse>(`/api/admin/events/${eventId}/cancel`, { method: 'POST' });
+        setStatusNotifications(result.notifications);
+      }
+      setStatusNotificationAction(action);
       await load();
     } catch (reason) {
       setError(reason);
@@ -404,6 +416,26 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
       </div>
       {Boolean(error) && <ErrorMessage error={error} />}
       {message && <Alert variant="success">{message}</Alert>}
+      {admin && statusNotifications && statusNotificationAction && (
+        <Alert variant={statusNotifications.failedCount > 0 ? 'error' : 'success'}>
+          {statusNotifications.failedCount > 0 ? (
+            <>
+              <p>{statusNotificationAction === 'cancel' ? 'Мероприятие отменено' : 'Мероприятие опубликовано'}. Отправлено писем: {statusNotifications.sentCount} из {statusNotifications.recipientCount}.</p>
+              <p>Не удалось доставить уведомления:</p>
+              <ul>{statusNotifications.failures.map((failure) => (
+                <li key={failure.userId}>
+                  {failure.name ?? failure.email ?? failure.userId}
+                  {failure.email && ` (${failure.email})`}: {failure.message}
+                </li>
+              ))}</ul>
+            </>
+          ) : statusNotifications.recipientCount === 0 ? (
+            `Мероприятие ${statusNotificationAction === 'cancel' ? 'отменено' : 'опубликовано'}. Квот для уведомления участников нет.`
+          ) : (
+            `Мероприятие ${statusNotificationAction === 'cancel' ? 'отменено' : 'опубликовано'}. Уведомления отправлены: ${statusNotifications.sentCount}.`
+          )}
+        </Alert>
+      )}
       {admin && <div className="tabs" role="tablist" aria-label="Разделы мероприятия">
         <button className={tab === 'overview' ? 'tab active' : 'tab'} role="tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')}>Обзор</button>
         <button className={tab === 'seats' ? 'tab active' : 'tab'} role="tab" aria-selected={tab === 'seats'} onClick={() => setTab('seats')}>Зал и бронирования</button>
