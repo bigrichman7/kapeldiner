@@ -21,6 +21,16 @@ public interface IUserEmailSender
         DateTimeOffset startAt,
         int availableSeats,
         CancellationToken cancellationToken);
+
+    Task<EmailSendResult> SendEventCancelledAsync(
+        string email,
+        string name,
+        string eventTitle,
+        string? eventDescription,
+        DateTimeOffset startAt,
+        DateTimeOffset endAt,
+        int availableSeats,
+        CancellationToken cancellationToken);
 }
 
 public enum EmailSendResult
@@ -64,6 +74,32 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
             + "С уважением,\nКапельдинер";
 
         return SendAsync(email, $"Новое мероприятие «{subjectTitle}» — ваша квота", body, cancellationToken);
+    }
+
+    public Task<EmailSendResult> SendEventCancelledAsync(
+        string email,
+        string name,
+        string eventTitle,
+        string? eventDescription,
+        DateTimeOffset startAt,
+        DateTimeOffset endAt,
+        int availableSeats,
+        CancellationToken cancellationToken)
+    {
+        string eventDate = startAt.ToString("dd.MM.yyyy 'в' HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        string eventEndDate = endAt.ToString("dd.MM.yyyy 'в' HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        string subjectTitle = eventTitle.Replace('\r', ' ').Replace('\n', ' ');
+        string description = string.IsNullOrWhiteSpace(eventDescription)
+            ? string.Empty
+            : $"\nОписание: {eventDescription}\n";
+        string body = $"Здравствуйте, {name}!\n\n"
+            + $"К сожалению, мероприятие «{eventTitle}», которое должно было состояться {eventDate} "
+            + $"и закончиться {eventEndDate} (время московское), отменено.\n"
+            + description
+            + $"Для вас была выделена квота на {availableSeats} мест.\n\n"
+            + "С уважением,\nКапельдинер";
+
+        return SendAsync(email, $"Мероприятие «{subjectTitle}» отменено", body, cancellationToken);
     }
 
     private async Task<EmailSendResult> SendAsync(

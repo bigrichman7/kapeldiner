@@ -35,4 +35,22 @@ public sealed class UserEmailSenderTests
 
         Assert.Equal(EmailSendResult.NotConfigured, result);
     }
+
+    [Fact]
+    public async Task EventCancellationEmailUsesExistingSmtpConfiguration()
+    {
+        var sender = new SmtpUserEmailSender(new ConfigurationBuilder().Build());
+
+        EmailSendResult result = await sender.SendEventCancelledAsync(
+            "user@example.com",
+            "Test User",
+            "Test event",
+            "Event description",
+            new DateTimeOffset(2026, 10, 20, 18, 30, 0, TimeSpan.FromHours(3)),
+            new DateTimeOffset(2026, 10, 20, 20, 30, 0, TimeSpan.FromHours(3)),
+            4,
+            CancellationToken.None);
+
+        Assert.Equal(EmailSendResult.NotConfigured, result);
+    }
 }

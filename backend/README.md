@@ -127,12 +127,15 @@ HTTPS Development API at `https://localhost:7282`; see the
 ### Optional email delivery
 
 Creating an account through `POST /api/admin/users` sends a generated
-permanent password by SMTP. Publishing a draft event also sends a notification
-to each user with a positive quota; the message includes the event title,
-Moscow start time, allocated places, and the placeholder booking site
-`https://kapeldiner.org`. The publish response reports each failed delivery,
-but email failures do not undo publication. A published event cannot be
-published again, so retries of the publish request do not resend notices.
+permanent password by SMTP. Publishing a draft event sends a notification to
+each user with a positive quota; the message includes the event title, Moscow
+start time, allocated places, and the placeholder booking site
+`https://kapeldiner.org`. Cancelling a draft or published event also notifies
+each user with a positive quota and includes the event details and allocated
+places. Both event responses report failed deliveries, but email failures do
+not undo publication or cancellation. A published event cannot be published
+again and a cancelled event cannot be cancelled again, so retries do not resend
+notices.
 SMTP is not needed to start the API or exercise the other endpoints. Without
 SMTP, account creation returns
 `503 EMAIL_NOT_CONFIGURED`; if delivery fails it returns
@@ -203,7 +206,7 @@ described above.
 | `POST` | `/api/admin/events` | Administrator | Create a draft event with optional initial quotas. |
 | `PATCH` | `/api/admin/events/{eventId}` | Administrator | Update details and optional-row setting. |
 | `POST` | `/api/admin/events/{eventId}/publish` | Administrator | Publish a draft event and notify users with positive quotas. |
-| `POST` | `/api/admin/events/{eventId}/cancel` | Administrator | Cancel a draft or published event. |
+| `POST` | `/api/admin/events/{eventId}/cancel` | Administrator | Cancel a draft or published event and notify users with positive quotas. |
 | `GET` | `/api/admin/events/{eventId}/seats` | Administrator | Read seats, designation, booking state, and occupant. |
 | `PUT` | `/api/admin/events/{eventId}/seats/{seatId}/designation` | Administrator | Set `vip`, `organization`, or `none`. |
 | `GET` | `/api/admin/events/{eventId}/reservations` | Administrator | List event reservations. |
@@ -217,12 +220,12 @@ test endpoint. These operational/test endpoints, health-check output,
 automatic model-binding errors, and unhandled server exceptions are not
 covered by the API envelope guarantee.
 
-`POST /api/admin/events/{eventId}/publish` returns the published event and a
-`notifications` summary (`recipientCount`, `sentCount`, `failedCount`, and
-`failures`). Each failure includes the user ID, available name/email, error
-code, and a Russian explanation. Quotas without a positive seat count do not
-receive a notice; quotas for a missing user or an invalid email are reported as
-failed notifications.
+Both event status endpoints return the event and a `notifications` summary
+(`recipientCount`, `sentCount`, `failedCount`, and `failures`). Each failure
+includes the user ID, available name/email, error code, and a Russian
+explanation. Quotas without a positive seat count do not receive a notice;
+quotas for a missing user or an invalid email are reported as failed
+notifications.
 
 ## Request and response examples
 

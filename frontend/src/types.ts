@@ -57,6 +57,11 @@ export interface EventPublishResponse {
   notifications: EventNotificationSummary;
 }
 
+export interface EventCancellationResponse {
+  event: EventItem;
+  notifications: EventNotificationSummary;
+}
+
 export interface UserSeat {
   seatId: string;
   available: boolean;

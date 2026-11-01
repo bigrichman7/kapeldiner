@@ -29,7 +29,7 @@ public sealed class EventsController(
         LoggerMessage.Define<Guid, Guid, string>(
             LogLevel.Warning,
             new EventId(1, nameof(LogNotificationFailure)),
-            "Event publication email delivery failed for event {EventId}, user {UserId}: {ErrorCode}");
+            "Event email delivery failed for event {EventId}, user {UserId}: {ErrorCode}");
 
     [HttpGet("admin/events")]
     [Authorize(Policy = "AdministratorOnly")]
@@ -298,13 +298,62 @@ public sealed class EventsController(
                 "Опубликовать можно только черновик мероприятия."));
         }
 
-        EventQuota[] quotas = await dbContext.EventQuotas
-            .AsNoTracking()
-            .Where(quota => quota.EventItemId == eventItem.Id && quota.AvailableSeats > 0)
-            .ToArrayAsync(cancellationToken);
-        Dictionary<Guid, AuthUser> users = await dbContext.AuthUsers
-            .Where(user => user.Role == AuthRoles.User && quotas.Select(quota => quota.UserId).Contains(user.Id))
-            .ToDictionaryAsync(user => user.Id, cancellationToken);
+        EventNotificationSummary notifications =
+            await SendQuotaNotificationsAsync(eventItem, cancelled: false, cancellationToken);
+
+        return Ok(ApiResponse.Ok(new PublishEventResponse(
+            ToResponse(eventItem, nowUtc, includeQuotas: false),
+            notifications)));
+    }
+
+    [HttpPost("admin/events/{eventId:guid}/cancel")]
+    [Authorize(Policy = "AdministratorOnly")]
+    public async Task<IActionResult> CancelEvent(Guid eventId, CancellationToken cancellationToken)
+    {
+        await completionService.CompleteEndedEventsAsync(cancellationToken);
+        await using KapeldinerServiceDbContext dbContext =
+            await contextFactory.CreateDbContextAsync(cancellationToken);
+        EventItem? eventItem = await dbContext.EventItems
+            .SingleOrDefaultAsync(item => item.Id == new EventItemId(eventId), cancellationToken);
+        if (eventItem is null)
+        {
+            return NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."));
+        }
+
+        DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        var cancelResult = eventItem.Cancel(nowUtc);
+        if (cancelResult.IsFailure)
+        {
+            return DomainFailure(cancelResult.Error);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        EventNotificationSummary notifications =
+            await SendQuotaNotificationsAsync(eventItem, cancelled: true, cancellationToken);
+
+        return Ok(ApiResponse.Ok(new EventCancellationResponse(
+            ToResponse(eventItem, nowUtc, includeQuotas: false),
+            notifications)));
+    }
+
+    private async Task<EventNotificationSummary> SendQuotaNotificationsAsync(
+        EventItem eventItem,
+        bool cancelled,
+        CancellationToken cancellationToken)
+    {
+        EventQuota[] quotas;
+        Dictionary<Guid, AuthUser> users;
+        await using (KapeldinerServiceDbContext dbContext =
+                     await contextFactory.CreateDbContextAsync(cancellationToken))
+        {
+            quotas = await dbContext.EventQuotas
+                .AsNoTracking()
+                .Where(quota => quota.EventItemId == eventItem.Id && quota.AvailableSeats > 0)
+                .ToArrayAsync(cancellationToken);
+            users = await dbContext.AuthUsers
+                .Where(user => user.Role == AuthRoles.User && quotas.Select(quota => quota.UserId).Contains(user.Id))
+                .ToDictionaryAsync(user => user.Id, cancellationToken);
+        }
 
         var failures = new List<EventNotificationFailure>();
         int sentCount = 0;
@@ -324,13 +373,23 @@ public sealed class EventsController(
                 continue;
             }
 
-            EmailSendResult sendResult = await emailSender.SendEventQuotaAsync(
-                user.Email,
-                user.Name,
-                eventItem.Title!,
-                AsMoscowOffset(eventItem.StardAt),
-                quota.AvailableSeats,
-                cancellationToken);
+            EmailSendResult sendResult = cancelled
+                ? await emailSender.SendEventCancelledAsync(
+                    user.Email,
+                    user.Name,
+                    eventItem.Title!,
+                    eventItem.Description,
+                    AsMoscowOffset(eventItem.StardAt),
+                    AsMoscowOffset(eventItem.EndAt),
+                    quota.AvailableSeats,
+                    cancellationToken)
+                : await emailSender.SendEventQuotaAsync(
+                    user.Email,
+                    user.Name,
+                    eventItem.Title!,
+                    AsMoscowOffset(eventItem.StardAt),
+                    quota.AvailableSeats,
+                    cancellationToken);
             if (sendResult == EmailSendResult.Sent)
             {
                 sentCount++;
@@ -347,15 +406,8 @@ public sealed class EventsController(
             LogNotificationFailure(logger, eventItem.Id.Value, user.Id, errorCode, null);
         }
 
-        return Ok(ApiResponse.Ok(new PublishEventResponse(
-            ToResponse(eventItem, nowUtc, includeQuotas: false),
-            new EventNotificationSummary(quotas.Length, sentCount, failures.Count, failures))));
+        return new EventNotificationSummary(quotas.Length, sentCount, failures.Count, failures);
     }
-
-    [HttpPost("admin/events/{eventId:guid}/cancel")]
-    [Authorize(Policy = "AdministratorOnly")]
-    public Task<IActionResult> CancelEvent(Guid eventId, CancellationToken cancellationToken) =>
-        ChangeStatusAsync(eventId, (eventItem, nowUtc) => eventItem.Cancel(nowUtc), cancellationToken);
 
     [HttpGet("events")]
     [Authorize]
@@ -403,32 +455,6 @@ public sealed class EventsController(
         return eventItem is null || quota is null
             ? NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."))
             : Ok(ApiResponse.Ok(ToResponse(eventItem, timeProvider.GetUtcNow().UtcDateTime, quota)));
-    }
-
-    private async Task<IActionResult> ChangeStatusAsync(
-        Guid eventId,
-        Func<EventItem, DateTime, CSharpFunctionalExtensions.Result<EventItem, DomainError>> changeStatus,
-        CancellationToken cancellationToken)
-    {
-        await completionService.CompleteEndedEventsAsync(cancellationToken);
-        await using KapeldinerServiceDbContext dbContext =
-            await contextFactory.CreateDbContextAsync(cancellationToken);
-        EventItem? eventItem = await dbContext.EventItems
-            .SingleOrDefaultAsync(item => item.Id == new EventItemId(eventId), cancellationToken);
-        if (eventItem is null)
-        {
-            return NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."));
-        }
-
-        DateTime nowUtc = timeProvider.GetUtcNow().UtcDateTime;
-        var result = changeStatus(eventItem, nowUtc);
-        if (result.IsFailure)
-        {
-            return DomainFailure(result.Error);
-        }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(ApiResponse.Ok(ToResponse(eventItem, nowUtc, includeQuotas: false)));
     }
 
     private IActionResult DomainFailure(DomainError error)
@@ -599,6 +625,10 @@ public sealed class EventsController(
         Guid? UserId = null);
 
     public sealed record PublishEventResponse(
+        EventResponse Event,
+        EventNotificationSummary Notifications);
+
+    public sealed record EventCancellationResponse(
         EventResponse Event,
         EventNotificationSummary Notifications);
 

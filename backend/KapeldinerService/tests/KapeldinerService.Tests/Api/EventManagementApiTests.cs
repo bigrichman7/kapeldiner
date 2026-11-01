@@ -141,9 +141,61 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
         using HttpResponseMessage cancelResponse = await SendAsAdminAsync(
             HttpMethod.Post,
             $"/api/admin/events/{eventId:D}/cancel");
+        using JsonDocument cancelBody = await JsonDocument.ParseAsync(await cancelResponse.Content.ReadAsStreamAsync());
+        JsonElement cancellationNotifications = cancelBody.RootElement.GetProperty("data").GetProperty("notifications");
         using HttpResponseMessage hiddenCancelled = await SendAsUserAsync(HttpMethod.Get, $"/api/events/{eventId:D}");
         Assert.Equal(HttpStatusCode.OK, cancelResponse.StatusCode);
+        Assert.Equal(1, cancellationNotifications.GetProperty("recipientCount").GetInt32());
+        Assert.Equal(1, cancellationNotifications.GetProperty("sentCount").GetInt32());
+        Assert.Equal(0, cancellationNotifications.GetProperty("failedCount").GetInt32());
+        EventCancellationEmailRequest cancellationEmail = Assert.Single(_factory.EmailSender.EventCancellationEmails);
+        Assert.Equal("event-user@example.com", cancellationEmail.Email);
+        Assert.Equal("Updated performance", cancellationEmail.EventTitle);
+        Assert.Equal("First performance", cancellationEmail.EventDescription);
+        Assert.Equal(startAt.ToOffset(TimeSpan.FromHours(3)), cancellationEmail.StartAt);
+        Assert.Equal(endAt.AddHours(1).ToOffset(TimeSpan.FromHours(3)), cancellationEmail.EndAt);
+        Assert.Equal(5, cancellationEmail.AvailableSeats);
         Assert.Equal(HttpStatusCode.NotFound, hiddenCancelled.StatusCode);
+    }
+
+    [Fact]
+    public async Task FailedCancellationNotificationsDoNotUndoCancellationAndAreReported()
+    {
+        await PrepareDatabaseAsync();
+        _factory.EmailSender.EventCancellationResult = EmailSendResult.Failed;
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = "Cancelled performance",
+                description = "Cancelled event details",
+                startAt,
+                endAt = startAt.AddHours(1),
+                quotas = new[] { new { userId = ExistingUserId, availableSeats = 2 } }
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+
+        using HttpResponseMessage cancelResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/cancel");
+        using JsonDocument cancelBody = await JsonDocument.ParseAsync(await cancelResponse.Content.ReadAsStreamAsync());
+        JsonElement notificationSummary = cancelBody.RootElement.GetProperty("data").GetProperty("notifications");
+
+        Assert.Equal(HttpStatusCode.OK, cancelResponse.StatusCode);
+        Assert.Equal(1, notificationSummary.GetProperty("recipientCount").GetInt32());
+        Assert.Equal(0, notificationSummary.GetProperty("sentCount").GetInt32());
+        Assert.Equal(1, notificationSummary.GetProperty("failedCount").GetInt32());
+        Assert.Equal("EMAIL_DELIVERY_FAILED", Assert.Single(notificationSummary.GetProperty("failures")
+            .EnumerateArray()).GetProperty("code").GetString());
+        Assert.Equal("Cancelled event details",
+            Assert.Single(_factory.EmailSender.EventCancellationEmails).EventDescription);
+
+        await using KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync();
+        EventItem cancelledEvent = await dbContext.EventItems.SingleAsync(item => item.Id == new EventItemId(eventId));
+        Assert.Equal(StatusEvent.Cancelled, cancelledEvent.Status);
     }
 
     [Fact]
@@ -812,7 +864,9 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     private async Task PrepareDatabaseAsync()
     {
         _factory.EmailSender.EventQuotaResult = EmailSendResult.Sent;
+        _factory.EmailSender.EventCancellationResult = EmailSendResult.Sent;
         _factory.EmailSender.ClearEventQuotaEmails();
+        _factory.EmailSender.ClearEventCancellationEmails();
         await _factory.EnsureDatabaseCreatedAsync();
         await using KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync();
         if (!await dbContext.AuthUsers.AnyAsync(user => user.Id == ExistingUserId))

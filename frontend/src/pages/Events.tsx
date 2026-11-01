@@ -5,7 +5,7 @@ import { SeatLegend, SeatMap } from '../components/SeatMap';
 import { PageFrame } from '../App';
 import { eventInputToIso, formatEventDate, formatEventDateInput, statusLabel } from '../format';
 import type {
-  AdminSeat, EventItem, EventNotificationSummary, EventPublishResponse, EventStatistics, Quota, Reservation, UserProfile, UserSeat,
+  AdminSeat, EventCancellationResponse, EventItem, EventNotificationSummary, EventPublishResponse, EventStatistics, Quota, Reservation, UserProfile, UserSeat,
 } from '../types';
 import { Alert, Button, EmptyState, ErrorMessage, FieldError, Loading } from '../ui';
 
@@ -232,7 +232,8 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [seatMode, setSeatMode] = useState<'booking' | 'designation'>('booking');
-  const [publicationNotifications, setPublicationNotifications] = useState<EventNotificationSummary | null>(null);
+  const [statusNotifications, setStatusNotifications] = useState<EventNotificationSummary | null>(null);
+  const [statusNotificationAction, setStatusNotificationAction] = useState<'publish' | 'cancel' | null>(null);
 
   async function load() {
     setLoading(true);
@@ -366,15 +367,17 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     setBusy(true);
     setError(null);
     setMessage('');
-    setPublicationNotifications(null);
+    setStatusNotifications(null);
+    setStatusNotificationAction(null);
     try {
       if (action === 'publish') {
         const result = await api<EventPublishResponse>(`/api/admin/events/${eventId}/publish`, { method: 'POST' });
-        setPublicationNotifications(result.notifications);
+        setStatusNotifications(result.notifications);
       } else {
-        await api(`/api/admin/events/${eventId}/cancel`, { method: 'POST' });
-        setMessage('Мероприятие отменено.');
+        const result = await api<EventCancellationResponse>(`/api/admin/events/${eventId}/cancel`, { method: 'POST' });
+        setStatusNotifications(result.notifications);
       }
+      setStatusNotificationAction(action);
       await load();
     } catch (reason) {
       setError(reason);
@@ -413,23 +416,23 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
       </div>
       {Boolean(error) && <ErrorMessage error={error} />}
       {message && <Alert variant="success">{message}</Alert>}
-      {admin && publicationNotifications && (
-        <Alert variant={publicationNotifications.failedCount > 0 ? 'error' : 'success'}>
-          {publicationNotifications.failedCount > 0 ? (
+      {admin && statusNotifications && statusNotificationAction && (
+        <Alert variant={statusNotifications.failedCount > 0 ? 'error' : 'success'}>
+          {statusNotifications.failedCount > 0 ? (
             <>
-              <p>Мероприятие опубликовано. Отправлено писем: {publicationNotifications.sentCount} из {publicationNotifications.recipientCount}.</p>
+              <p>{statusNotificationAction === 'cancel' ? 'Мероприятие отменено' : 'Мероприятие опубликовано'}. Отправлено писем: {statusNotifications.sentCount} из {statusNotifications.recipientCount}.</p>
               <p>Не удалось доставить уведомления:</p>
-              <ul>{publicationNotifications.failures.map((failure) => (
+              <ul>{statusNotifications.failures.map((failure) => (
                 <li key={failure.userId}>
                   {failure.name ?? failure.email ?? failure.userId}
                   {failure.email && ` (${failure.email})`}: {failure.message}
                 </li>
               ))}</ul>
             </>
-          ) : publicationNotifications.recipientCount === 0 ? (
-            'Мероприятие опубликовано. Квот для уведомления участников нет.'
+          ) : statusNotifications.recipientCount === 0 ? (
+            `Мероприятие ${statusNotificationAction === 'cancel' ? 'отменено' : 'опубликовано'}. Квот для уведомления участников нет.`
           ) : (
-            `Мероприятие опубликовано. Уведомления отправлены: ${publicationNotifications.sentCount}.`
+            `Мероприятие ${statusNotificationAction === 'cancel' ? 'отменено' : 'опубликовано'}. Уведомления отправлены: ${statusNotifications.sentCount}.`
           )}
         </Alert>
       )}
