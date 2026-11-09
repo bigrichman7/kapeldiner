@@ -2,15 +2,19 @@ using KapeldinerService.Infrastructure.Postgres;
 using KapeldinerService.Infrastructure.Postgres.Authentication;
 using KapeldinerService.Web.Auth;
 using KapeldinerService.Web.Events;
+using KapeldinerService.Web.Tickets;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using QuestPDF.Infrastructure;
 using Scalar.AspNetCore;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+
+QuestPDF.Settings.License = LicenseType.Community;
 
 var connectionString = builder.Configuration.GetConnectionString("KapeldinerServiceDb");
 
@@ -18,6 +22,7 @@ builder.Services.AddDbContextFactory<KapeldinerServiceDbContext>(options => opti
 
 builder.Services.AddSingleton<IPasswordHasher<AuthUser>, PasswordHasher<AuthUser>>();
 builder.Services.AddSingleton<IUserEmailSender, SmtpUserEmailSender>();
+builder.Services.AddSingleton<IEventTicketPdfGenerator, EventTicketPdfGenerator>();
 builder.Services.AddSingleton<EfAuthenticationTicketStore>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<EventCompletionService>();

@@ -234,6 +234,8 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   const [seatMode, setSeatMode] = useState<'booking' | 'designation'>('booking');
   const [statusNotifications, setStatusNotifications] = useState<EventNotificationSummary | null>(null);
   const [statusNotificationAction, setStatusNotificationAction] = useState<'publish' | 'cancel' | null>(null);
+  const [ticketOptionsVisible, setTicketOptionsVisible] = useState(false);
+  const [ticketBusy, setTicketBusy] = useState<'download' | 'email' | null>(null);
 
   async function load() {
     setLoading(true);
@@ -345,6 +347,59 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     }
   }
 
+  async function downloadTickets() {
+    setTicketBusy('download');
+    setError(null);
+    try {
+      const path = admin
+        ? `/api/admin/events/${eventId}/quotas/${selectedUserId}/reservation/tickets`
+        : `/api/events/${eventId}/my-reservation/tickets`;
+      const response = await fetch(path, { credentials: 'include' });
+      if (!response.ok) {
+        let code = 'REQUEST_FAILED';
+        let message = 'Не удалось скачать билеты.';
+        try {
+          const envelope = await response.json();
+          code = envelope.error?.code ?? code;
+          message = envelope.error?.message ?? message;
+        } catch { /* The server response was not a JSON error envelope. */ }
+        throw new ApiError(response.status, code, message);
+      }
+
+      const file = await response.blob();
+      const objectUrl = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `tickets-${eventId}.pdf`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setTicketOptionsVisible(false);
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setTicketBusy(null);
+    }
+  }
+
+  async function emailTickets() {
+    setTicketBusy('email');
+    setError(null);
+    try {
+      const path = admin
+        ? `/api/admin/events/${eventId}/quotas/${selectedUserId}/reservation/tickets/email`
+        : `/api/events/${eventId}/my-reservation/tickets/email`;
+      const result = await api<{ email: string }>(path, { method: 'POST' });
+      setMessage(`Билеты отправлены на ${result.email}.`);
+      setTicketOptionsVisible(false);
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setTicketBusy(null);
+    }
+  }
+
   async function changeDesignation(seatId: string, next: 'vip' | 'organization' | 'none') {
     if (!canAdminManage) return;
     setBusy(true);
@@ -394,7 +449,10 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   if (Boolean(error) && !event) return <PageFrame title="Мероприятие"><ErrorMessage error={error} /></PageFrame>;
   if (!event) return <PageFrame title="Мероприятие"><EmptyState title="Мероприятие не найдено" /></PageFrame>;
   const reserveCount = selectedSeats.size;
-  const quota = admin ? quotas.find((item) => item.userId === selectedUserId) : event.myQuota;
+  const selectedQuota = admin ? quotas.find((item) => item.userId === selectedUserId) : undefined;
+  const quota = selectedQuota ?? event.myQuota;
+  const reservationMatchesSelection = currentReservation?.seatIds.length === selectedSeats.size
+    && currentReservation.seatIds.every((seatId) => selectedSeats.has(seatId));
 
   return (
     <PageFrame
@@ -447,7 +505,35 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
           {!admin && <section className="quota-summary"><div className="quota-circle">{quota?.remainingSeats ?? 0}</div><div><strong>Осталось мест по квоте</strong><p className="muted">{quota?.usedSeats ?? 0} забронировано из {quota?.availableSeats ?? 0}</p></div></section>}
           {!admin && (
             <section className="panel reservation-panel">
-              <div className="section-heading"><div><h2>Выберите места</h2><p className="muted">Можно выбрать до {quota?.remainingSeats ?? 0} дополнительных мест. Ваши места отмечены.</p></div><span className="selection-count">{reserveCount} выбрано</span></div>
+              <div className="section-heading">
+                <div><h2>Выберите места</h2><p className="muted">Можно выбрать до {quota?.remainingSeats ?? 0} дополнительных мест. Ваши места отмечены.</p></div>
+                <div className="ticket-heading-actions">
+                  <span className="selection-count">{reserveCount} выбрано</span>
+                  {currentReservation?.seatIds.length ? (
+                    <Button
+                      variant="secondary"
+                      disabled={ticketBusy !== null}
+                      onClick={() => setTicketOptionsVisible((visible) => !visible)}
+                    >
+                      {ticketOptionsVisible ? 'Скрыть варианты' : 'Получить билеты'}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              {ticketOptionsVisible && currentReservation?.seatIds.length ? (
+                <div className="ticket-actions">
+                  <p className="muted">Получить билеты для {currentReservation.seatIds.length} мест:</p>
+                  {!reservationMatchesSelection && <p className="helper-text">Сначала сохраните изменения выбранных мест.</p>}
+                  <div className="heading-actions">
+                    <Button variant="secondary" disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void downloadTickets()}>
+                      {ticketBusy === 'download' ? 'Готовим PDF…' : 'Скачать PDF'}
+                    </Button>
+                    <Button disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void emailTickets()}>
+                      {ticketBusy === 'email' ? 'Отправляем…' : 'Отправить на почту'}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               <SeatLegend />
               <SeatMap data={seatData as UserSeat[]} selected={selectedSeats} onToggle={toggleSeat} disabled={!canBook} enableAdditionalRow12A={event.enableAdditionalRow12A} />
               {!canBook && <p className="helper-text">Бронирование закрыто: мероприятие уже началось или не опубликовано.</p>}
@@ -469,6 +555,34 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
               {seatMode === 'designation' && <label className="field"><span className="sr-only">Категория нового места</span><select value={designation} onChange={(event) => setDesignation(event.target.value as typeof designation)}><option value="vip">VIP</option><option value="organization">Организационное</option><option value="none">Снять категорию</option></select></label>}
             </div>
           </div>
+          {event.status === 'published' && seatMode === 'booking' && currentReservation?.seatIds.length ? (
+            <>
+              <div className="ticket-heading-actions">
+                <span className="selection-count">{currentReservation.seatIds.length} мест забронировано для {selectedQuota?.name ?? selectedQuota?.login ?? 'подразделения'}</span>
+                <Button
+                  variant="secondary"
+                  disabled={ticketBusy !== null}
+                  onClick={() => setTicketOptionsVisible((visible) => !visible)}
+                >
+                  {ticketOptionsVisible ? 'Скрыть варианты' : 'Получить билеты'}
+                </Button>
+              </div>
+              {ticketOptionsVisible && (
+                <div className="ticket-actions">
+                  <p className="muted">Билеты для подразделения «{selectedQuota?.name ?? selectedQuota?.login ?? 'выбранное подразделение'}». Количество мест: {currentReservation.seatIds.length}.</p>
+                  {!reservationMatchesSelection && <p className="helper-text">Сначала сохраните изменения выбранных мест.</p>}
+                  <div className="heading-actions">
+                    <Button variant="secondary" disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void downloadTickets()}>
+                      {ticketBusy === 'download' ? 'Готовим PDF…' : 'Скачать PDF'}
+                    </Button>
+                    <Button disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void emailTickets()}>
+                      {ticketBusy === 'email' ? 'Отправляем…' : 'Отправить на почту'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : null}
           <SeatLegend admin />
           <SeatMap
             data={seatData as AdminSeat[]}

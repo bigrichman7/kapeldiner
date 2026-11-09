@@ -12,6 +12,8 @@
   <ItemGroup>
     <EmbeddedResource Include="../../../../docs/hall-layout.json"
                       LogicalName="KapeldinerService.Web.hall-layout.json" />
+    <EmbeddedResource Include="Assets/ticket-logo.jpg"
+                      LogicalName="KapeldinerService.Web.ticket-logo.jpg" />
   </ItemGroup>
 
   <ItemGroup>
@@ -19,5 +21,6 @@
     <PackageReference Include="Microsoft.OpenApi" />
     <PackageReference Include="Scalar.AspNetCore" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
+    <PackageReference Include="QuestPDF" />
   </ItemGroup>
 </Project>

@@ -53,4 +53,19 @@ public sealed class UserEmailSenderTests
 
         Assert.Equal(EmailSendResult.NotConfigured, result);
     }
+
+    [Fact]
+    public async Task TicketEmailUsesExistingSmtpConfiguration()
+    {
+        var sender = new SmtpUserEmailSender(new ConfigurationBuilder().Build());
+
+        EmailSendResult result = await sender.SendTicketsAsync(
+            "user@example.com",
+            "Test User",
+            "Test event",
+            "%PDF-test"u8.ToArray(),
+            CancellationToken.None);
+
+        Assert.Equal(EmailSendResult.NotConfigured, result);
+    }
 }

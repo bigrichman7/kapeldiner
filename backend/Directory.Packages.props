@@ -23,6 +23,7 @@
     <PackageVersion Include="Scalar.AspNetCore" Version="2.13.0" />
     <!-- Health checks -->
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.7" />
+    <PackageVersion Include="QuestPDF" Version="2025.7.4" />
     <!-- Tests -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.7" />
     <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.14" />
