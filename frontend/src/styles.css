@@ -161,7 +161,8 @@ small { color: var(--muted); font-size: .78rem; }
 .seat-vip.seat-selected, .seat-organization.seat-selected { border-color: var(--blue); background: var(--blue); color: #fff; }
 .booking-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding-top: 17px; border-top: 1px solid var(--line); }
 .booking-actions p { margin: 4px 0 0; font-size: .79rem; }
-.ticket-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--line); }
+.ticket-heading-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.ticket-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: -5px 0 16px; padding: 12px; border: 1px solid #d7e5f2; border-radius: 10px; background: #f7fbff; }
 .ticket-actions > .muted, .ticket-actions > .helper-text { flex-basis: 100%; font-size: .82rem; }
 .ticket-actions > .helper-text { margin-top: -7px; }
 .booking-roster { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }

@@ -498,7 +498,35 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
           {!admin && <section className="quota-summary"><div className="quota-circle">{quota?.remainingSeats ?? 0}</div><div><strong>Осталось мест по квоте</strong><p className="muted">{quota?.usedSeats ?? 0} забронировано из {quota?.availableSeats ?? 0}</p></div></section>}
           {!admin && (
             <section className="panel reservation-panel">
-              <div className="section-heading"><div><h2>Выберите места</h2><p className="muted">Можно выбрать до {quota?.remainingSeats ?? 0} дополнительных мест. Ваши места отмечены.</p></div><span className="selection-count">{reserveCount} выбрано</span></div>
+              <div className="section-heading">
+                <div><h2>Выберите места</h2><p className="muted">Можно выбрать до {quota?.remainingSeats ?? 0} дополнительных мест. Ваши места отмечены.</p></div>
+                <div className="ticket-heading-actions">
+                  <span className="selection-count">{reserveCount} выбрано</span>
+                  {myReservation?.seatIds.length ? (
+                    <Button
+                      variant="secondary"
+                      disabled={ticketBusy !== null}
+                      onClick={() => setTicketOptionsVisible((visible) => !visible)}
+                    >
+                      {ticketOptionsVisible ? 'Скрыть варианты' : 'Получить билеты'}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+              {ticketOptionsVisible && myReservation?.seatIds.length ? (
+                <div className="ticket-actions">
+                  <p className="muted">Получить билеты для {myReservation.seatIds.length} мест:</p>
+                  {!reservationMatchesSelection && <p className="helper-text">Сначала сохраните изменения выбранных мест.</p>}
+                  <div className="heading-actions">
+                    <Button variant="secondary" disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void downloadTickets()}>
+                      {ticketBusy === 'download' ? 'Готовим PDF…' : 'Скачать PDF'}
+                    </Button>
+                    <Button disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void emailTickets()}>
+                      {ticketBusy === 'email' ? 'Отправляем…' : 'Отправить на почту'}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               <SeatLegend />
               <SeatMap data={seatData as UserSeat[]} selected={selectedSeats} onToggle={toggleSeat} disabled={!canBook} enableAdditionalRow12A={event.enableAdditionalRow12A} />
               {!canBook && <p className="helper-text">Бронирование закрыто: мероприятие уже началось или не опубликовано.</p>}
@@ -507,34 +535,6 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
                 {myReservation?.seatIds.length ? <Button variant="danger" disabled={busy || !canBook} onClick={() => void cancelReservation()}>Отменить бронь</Button> : null}
                 <Button disabled={busy || !canBook || selectedSeats.size > (quota?.availableSeats ?? 0)} onClick={() => void saveReservation()}>{busy ? 'Сохраняем…' : myReservation?.seatIds.length ? 'Обновить бронь' : 'Подтвердить выбор'}</Button>
               </div>
-              {myReservation?.seatIds.length ? (
-                <div className="ticket-actions">
-                  {!ticketOptionsVisible ? (
-                    <Button
-                      variant="secondary"
-                      disabled={ticketBusy !== null || !reservationMatchesSelection}
-                      onClick={() => setTicketOptionsVisible(true)}
-                    >
-                      Получить билеты
-                    </Button>
-                  ) : (
-                    <>
-                      <p className="muted">Выберите, как получить билеты для {myReservation.seatIds.length} мест.</p>
-                      {!reservationMatchesSelection && <p className="helper-text">Сначала сохраните изменения выбранных мест.</p>}
-                      <div className="heading-actions">
-                        <Button variant="secondary" disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void downloadTickets()}>
-                          {ticketBusy === 'download' ? 'Готовим PDF…' : 'Скачать PDF'}
-                        </Button>
-                        <Button disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void emailTickets()}>
-                          {ticketBusy === 'email' ? 'Отправляем…' : 'Отправить на почту'}
-                        </Button>
-                        <Button variant="quiet" disabled={ticketBusy !== null} onClick={() => setTicketOptionsVisible(false)}>Отмена</Button>
-                      </div>
-                    </>
-                  )}
-                  {!reservationMatchesSelection && !ticketOptionsVisible && <p className="helper-text">Чтобы получить билеты для нового выбора, сначала сохраните бронирование.</p>}
-                </div>
-              ) : null}
             </section>
           )}
         </>
