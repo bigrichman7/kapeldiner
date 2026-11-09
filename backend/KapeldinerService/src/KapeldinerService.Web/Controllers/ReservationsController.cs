@@ -73,6 +73,55 @@ public sealed class ReservationsController(
         return Ok(ApiResponse.Ok(new { email = ticketData.Email }));
     }
 
+    [HttpGet("admin/events/{eventId:guid}/quotas/{userId:guid}/reservation/tickets")]
+    [Authorize(Policy = "AdministratorOnly")]
+    public async Task<IActionResult> DownloadUserTickets(
+        Guid eventId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        (IActionResult? error, TicketRequestData? ticketData) =
+            await LoadTicketRequestAsync(eventId, userId, cancellationToken);
+        if (error is not null)
+            return error;
+
+        byte[] pdf = ticketPdfGenerator.Generate(ticketData!.Tickets);
+        return File(pdf, "application/pdf", $"tickets-{eventId:N}.pdf");
+    }
+
+    [HttpPost("admin/events/{eventId:guid}/quotas/{userId:guid}/reservation/tickets/email")]
+    [Authorize(Policy = "AdministratorOnly")]
+    public async Task<IActionResult> EmailUserTickets(
+        Guid eventId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        (IActionResult? error, TicketRequestData? ticketData) =
+            await LoadTicketRequestAsync(eventId, userId, cancellationToken);
+        if (error is not null)
+            return error;
+
+        byte[] pdf = ticketPdfGenerator.Generate(ticketData!.Tickets);
+        EmailSendResult sendResult = await emailSender.SendTicketsAsync(
+            ticketData.Email,
+            ticketData.Name,
+            ticketData.EventTitle,
+            pdf,
+            cancellationToken);
+        if (sendResult == EmailSendResult.NotConfigured)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                ApiResponse.Failure<object>("EMAIL_NOT_CONFIGURED", "Отправка электронной почты не настроена."));
+        }
+        if (sendResult == EmailSendResult.Failed)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway,
+                ApiResponse.Failure<object>("EMAIL_DELIVERY_FAILED", "Не удалось отправить письмо с билетами."));
+        }
+
+        return Ok(ApiResponse.Ok(new { email = ticketData.Email }));
+    }
+
     private async Task<(IActionResult? Error, TicketRequestData? Data)> LoadTicketRequestAsync(
         Guid eventId,
         Guid userId,

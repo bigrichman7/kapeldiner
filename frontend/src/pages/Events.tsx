@@ -351,7 +351,10 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     setTicketBusy('download');
     setError(null);
     try {
-      const response = await fetch(`/api/events/${eventId}/my-reservation/tickets`, { credentials: 'include' });
+      const path = admin
+        ? `/api/admin/events/${eventId}/quotas/${selectedUserId}/reservation/tickets`
+        : `/api/events/${eventId}/my-reservation/tickets`;
+      const response = await fetch(path, { credentials: 'include' });
       if (!response.ok) {
         let code = 'REQUEST_FAILED';
         let message = 'Не удалось скачать билеты.';
@@ -384,7 +387,10 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     setTicketBusy('email');
     setError(null);
     try {
-      const result = await api<{ email: string }>(`/api/events/${eventId}/my-reservation/tickets/email`, { method: 'POST' });
+      const path = admin
+        ? `/api/admin/events/${eventId}/quotas/${selectedUserId}/reservation/tickets/email`
+        : `/api/events/${eventId}/my-reservation/tickets/email`;
+      const result = await api<{ email: string }>(path, { method: 'POST' });
       setMessage(`Билеты отправлены на ${result.email}.`);
       setTicketOptionsVisible(false);
     } catch (reason) {
@@ -443,9 +449,10 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   if (Boolean(error) && !event) return <PageFrame title="Мероприятие"><ErrorMessage error={error} /></PageFrame>;
   if (!event) return <PageFrame title="Мероприятие"><EmptyState title="Мероприятие не найдено" /></PageFrame>;
   const reserveCount = selectedSeats.size;
-  const quota = admin ? quotas.find((item) => item.userId === selectedUserId) : event.myQuota;
-  const reservationMatchesSelection = myReservation?.seatIds.length === selectedSeats.size
-    && myReservation.seatIds.every((seatId) => selectedSeats.has(seatId));
+  const selectedQuota = admin ? quotas.find((item) => item.userId === selectedUserId) : undefined;
+  const quota = selectedQuota ?? event.myQuota;
+  const reservationMatchesSelection = currentReservation?.seatIds.length === selectedSeats.size
+    && currentReservation.seatIds.every((seatId) => selectedSeats.has(seatId));
 
   return (
     <PageFrame
@@ -502,7 +509,7 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
                 <div><h2>Выберите места</h2><p className="muted">Можно выбрать до {quota?.remainingSeats ?? 0} дополнительных мест. Ваши места отмечены.</p></div>
                 <div className="ticket-heading-actions">
                   <span className="selection-count">{reserveCount} выбрано</span>
-                  {myReservation?.seatIds.length ? (
+                  {currentReservation?.seatIds.length ? (
                     <Button
                       variant="secondary"
                       disabled={ticketBusy !== null}
@@ -513,9 +520,9 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
                   ) : null}
                 </div>
               </div>
-              {ticketOptionsVisible && myReservation?.seatIds.length ? (
+              {ticketOptionsVisible && currentReservation?.seatIds.length ? (
                 <div className="ticket-actions">
-                  <p className="muted">Получить билеты для {myReservation.seatIds.length} мест:</p>
+                  <p className="muted">Получить билеты для {currentReservation.seatIds.length} мест:</p>
                   {!reservationMatchesSelection && <p className="helper-text">Сначала сохраните изменения выбранных мест.</p>}
                   <div className="heading-actions">
                     <Button variant="secondary" disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void downloadTickets()}>
@@ -548,6 +555,34 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
               {seatMode === 'designation' && <label className="field"><span className="sr-only">Категория нового места</span><select value={designation} onChange={(event) => setDesignation(event.target.value as typeof designation)}><option value="vip">VIP</option><option value="organization">Организационное</option><option value="none">Снять категорию</option></select></label>}
             </div>
           </div>
+          {event.status === 'published' && seatMode === 'booking' && currentReservation?.seatIds.length ? (
+            <>
+              <div className="ticket-heading-actions">
+                <span className="selection-count">{currentReservation.seatIds.length} мест забронировано для {selectedQuota?.name ?? selectedQuota?.login ?? 'подразделения'}</span>
+                <Button
+                  variant="secondary"
+                  disabled={ticketBusy !== null}
+                  onClick={() => setTicketOptionsVisible((visible) => !visible)}
+                >
+                  {ticketOptionsVisible ? 'Скрыть варианты' : 'Получить билеты'}
+                </Button>
+              </div>
+              {ticketOptionsVisible && (
+                <div className="ticket-actions">
+                  <p className="muted">Билеты для подразделения «{selectedQuota?.name ?? selectedQuota?.login ?? 'выбранное подразделение'}». Количество мест: {currentReservation.seatIds.length}.</p>
+                  {!reservationMatchesSelection && <p className="helper-text">Сначала сохраните изменения выбранных мест.</p>}
+                  <div className="heading-actions">
+                    <Button variant="secondary" disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void downloadTickets()}>
+                      {ticketBusy === 'download' ? 'Готовим PDF…' : 'Скачать PDF'}
+                    </Button>
+                    <Button disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void emailTickets()}>
+                      {ticketBusy === 'email' ? 'Отправляем…' : 'Отправить на почту'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : null}
           <SeatLegend admin />
           <SeatMap
             data={seatData as AdminSeat[]}

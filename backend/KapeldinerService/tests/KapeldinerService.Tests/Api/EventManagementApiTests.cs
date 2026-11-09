@@ -106,6 +106,64 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     }
 
     [Fact]
+    public async Task AdministratorCanDownloadAndEmailPdfTicketsForASelectedQuotaReservation()
+    {
+        await PrepareDatabaseAsync();
+        _factory.EmailSender.TicketEmails.Clear();
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = "Admin ticket performance",
+                startAt,
+                endAt = startAt.AddHours(2),
+                quotas = new[] { new { userId = ExistingUserId, availableSeats = 4 } }
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+        using HttpResponseMessage publishResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        using HttpResponseMessage bookingResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}/reservation",
+            new { seatIds = TicketReservationSeats });
+
+        string ticketPath = $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}/reservation/tickets";
+        using HttpResponseMessage downloadResponse = await SendAsAdminAsync(HttpMethod.Get, ticketPath);
+        byte[] pdf = await downloadResponse.Content.ReadAsByteArrayAsync();
+        using HttpResponseMessage emailResponse = await SendAsAdminAsync(HttpMethod.Post, $"{ticketPath}/email");
+        using JsonDocument emailBody = await JsonDocument.ParseAsync(await emailResponse.Content.ReadAsStreamAsync());
+        using HttpResponseMessage forbiddenResponse = await SendWithRoleAsync(
+            HttpMethod.Get,
+            ticketPath,
+            AuthRoles.User,
+            null);
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bookingResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, downloadResponse.StatusCode);
+        Assert.Equal("application/pdf", downloadResponse.Content.Headers.ContentType?.MediaType);
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(pdf), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, emailResponse.StatusCode);
+        Assert.Equal("event-user@example.com", emailBody.RootElement.GetProperty("data").GetProperty("email").GetString());
+        TicketEmailRequest sentEmail = Assert.Single(_factory.EmailSender.TicketEmails);
+        Assert.Equal("Event User", sentEmail.Name);
+        Assert.Equal("Admin ticket performance", sentEmail.EventTitle);
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(sentEmail.Pdf.ToArray()), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+
+        await using KapeldinerServiceDbContext cleanupContext = await _factory.CreateDbContextAsync();
+        EventItem eventToDelete = await cleanupContext.EventItems.SingleAsync(
+            item => item.Id == new EventItemId(eventId));
+        cleanupContext.EventItems.Remove(eventToDelete);
+        await cleanupContext.SaveChangesAsync();
+    }
+
+    [Fact]
     public async Task EventCreationRejectsInitialQuotaAboveHallCapacity()
     {
         await PrepareDatabaseAsync();

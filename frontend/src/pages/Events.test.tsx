@@ -1,8 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api';
-import type { EventItem, Reservation, UserSeat } from '../types';
+import type { AdminSeat, EventStatistics, EventItem, Quota, Reservation, UserProfile, UserSeat } from '../types';
 import { EventDetailPage } from './Events';
 
 vi.mock('../api', () => ({
@@ -90,5 +90,71 @@ describe('EventDetailPage ticket controls', () => {
     fireEvent.click(ticketButton);
     expect(screen.getByRole('button', { name: 'Скачать PDF' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Отправить на почту' })).toBeEnabled();
+  });
+
+  it('lets an administrator get tickets for the selected participant reservation', async () => {
+    const adminEvent: EventItem = { ...event, quotas: [{ userId: 'user-1', availableSeats: 2, usedSeats: 1, remainingSeats: 1 }] };
+    const quota: Quota = {
+      eventId: event.eventId,
+      userId: 'user-1',
+      login: 'member',
+      name: 'Отделение',
+      availableSeats: 2,
+      usedSeats: 1,
+      remainingSeats: 1,
+    };
+    const reservation: Reservation = {
+      ...emptyReservation,
+      reservationId: 'reservation-1',
+      seatIds: ['1-1'],
+      usedSeats: 1,
+      remainingSeats: 1,
+    };
+    const statistics: EventStatistics = {
+      eventId: event.eventId,
+      totalSeats: 1,
+      reservedSeats: 1,
+      unreservedSeats: 0,
+      userBookableSeats: 0,
+      allocatedQuotaSeats: 2,
+      usedQuotaSeats: 1,
+      remainingQuotaSeats: 1,
+      reservationCount: 1,
+      users: [],
+    };
+    const user: UserProfile = {
+      id: quota.userId,
+      login: quota.login!,
+      email: 'member@example.com',
+      name: quota.name!,
+      role: 'User',
+      createdAtUtc: '2026-11-01T10:00:00Z',
+    };
+
+    vi.mocked(api).mockImplementation(async <T,>(path: string): Promise<T> => {
+      if (path === `/api/admin/events/${event.eventId}`) return adminEvent as T;
+      if (path === `/api/admin/events/${event.eventId}/statistics`) return statistics as T;
+      if (path === `/api/admin/events/${event.eventId}/quotas`) return [quota] as T;
+      if (path === `/api/admin/events/${event.eventId}/seats`) return [{ seatId: '1-1', booked: true, designation: null, userId: quota.userId, userName: quota.name }] satisfies AdminSeat[] as T;
+      if (path === `/api/admin/events/${event.eventId}/reservations`) return [reservation] as T;
+      if (path === '/api/admin/users') return [user] as T;
+      if (path === `/api/admin/events/${event.eventId}/quotas/${quota.userId}/reservation`) return reservation as T;
+      throw new Error(`Unexpected API request: ${path}`);
+    });
+
+    const { container } = render(
+      <MemoryRouter initialEntries={[`/admin/events/${event.eventId}`]}>
+        <Routes>
+          <Route path="/admin/events/:eventId" element={<EventDetailPage mode="admin" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const view = within(container);
+    fireEvent.click(await view.findByRole('tab', { name: 'Зал и бронирования' }));
+    fireEvent.click(await view.findByRole('button', { name: 'Получить билеты' }));
+    await waitFor(() => expect(view.getByRole('button', { name: 'Скачать PDF' })).toBeEnabled());
+    expect(view.getByRole('button', { name: 'Отправить на почту' })).toBeEnabled();
+    expect(view.getByText('Билеты для подразделения «Отделение». Количество мест: 1.')).toBeInTheDocument();
   });
 });
