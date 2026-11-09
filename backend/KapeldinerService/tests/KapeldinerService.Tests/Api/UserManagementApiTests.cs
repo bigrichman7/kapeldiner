@@ -376,6 +376,9 @@ public sealed class TestUserEmailSender : IUserEmailSender
     public ICollection<EventCancellationEmailRequest> EventCancellationEmails { get; } =
         new System.Collections.ObjectModel.Collection<EventCancellationEmailRequest>();
 
+    public ICollection<TicketEmailRequest> TicketEmails { get; } =
+        new System.Collections.ObjectModel.Collection<TicketEmailRequest>();
+
     public void ClearEventQuotaEmails() => EventQuotaEmails.Clear();
 
     public void ClearEventCancellationEmails() => EventCancellationEmails.Clear();
@@ -417,6 +420,17 @@ public sealed class TestUserEmailSender : IUserEmailSender
             email, name, eventTitle, eventDescription, startAt, endAt, availableSeats));
         return Task.FromResult(EventCancellationResult);
     }
+
+    public Task<EmailSendResult> SendTicketsAsync(
+        string email,
+        string name,
+        string eventTitle,
+        byte[] pdf,
+        CancellationToken cancellationToken)
+    {
+        TicketEmails.Add(new TicketEmailRequest(email, name, eventTitle, pdf.ToArray()));
+        return Task.FromResult(Result);
+    }
 }
 
 public sealed record EventQuotaEmailRequest(
@@ -434,6 +448,8 @@ public sealed record EventCancellationEmailRequest(
     DateTimeOffset StartAt,
     DateTimeOffset EndAt,
     int AvailableSeats);
+
+public sealed record TicketEmailRequest(string Email, string Name, string EventTitle, IReadOnlyList<byte> Pdf);
 
 public sealed class UserManagementTestAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,

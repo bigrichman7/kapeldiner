@@ -24,6 +24,8 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     private static readonly string[] InitialReservationSeats = ["1-1", "1-2"];
     private static readonly string[] ReplacementReservationSeats = ["1-2", "1-3"];
     private static readonly string[] OccupiedReservationSeat = ["1-1"];
+    private static readonly string[] TicketReservationSeats = ["1-1", "1-2"];
+    private static readonly string[] UpdatedTicketReservationSeats = ["1-3"];
     private readonly UserManagementApiFactory _factory;
     private readonly HttpClient _client;
 
@@ -31,6 +33,76 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     {
         _factory = factory;
         _client = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task UserCanDownloadAndEmailPdfTicketsForTheCurrentReservation()
+    {
+        await PrepareDatabaseAsync();
+        _factory.EmailSender.TicketEmails.Clear();
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = "Ticket performance",
+                startAt,
+                endAt = startAt.AddHours(2),
+                quotas = new[] { new { userId = ExistingUserId, availableSeats = 4 } }
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+        using HttpResponseMessage publishResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        using HttpResponseMessage bookingResponse = await SendWithRoleAsync(
+            HttpMethod.Put,
+            $"/api/events/{eventId:D}/my-reservation",
+            AuthRoles.User,
+            new { seatIds = TicketReservationSeats });
+
+        using HttpResponseMessage downloadResponse = await SendAsUserAsync(
+            HttpMethod.Get,
+            $"/api/events/{eventId:D}/my-reservation/tickets");
+        byte[] firstPdf = await downloadResponse.Content.ReadAsByteArrayAsync();
+        using HttpResponseMessage emailResponse = await SendWithRoleAsync(
+            HttpMethod.Post,
+            $"/api/events/{eventId:D}/my-reservation/tickets/email",
+            AuthRoles.User,
+            null);
+        using JsonDocument emailBody = await JsonDocument.ParseAsync(await emailResponse.Content.ReadAsStreamAsync());
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bookingResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, downloadResponse.StatusCode);
+        Assert.Equal("application/pdf", downloadResponse.Content.Headers.ContentType?.MediaType);
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(firstPdf), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, emailResponse.StatusCode);
+        Assert.Equal("event-user@example.com", emailBody.RootElement.GetProperty("data").GetProperty("email").GetString());
+        TicketEmailRequest sentEmail = Assert.Single(_factory.EmailSender.TicketEmails);
+        Assert.Equal("Ticket performance", sentEmail.EventTitle);
+        Assert.StartsWith("%PDF", System.Text.Encoding.ASCII.GetString(sentEmail.Pdf.ToArray()), StringComparison.Ordinal);
+
+        using HttpResponseMessage replaceResponse = await SendWithRoleAsync(
+            HttpMethod.Put,
+            $"/api/events/{eventId:D}/my-reservation",
+            AuthRoles.User,
+            new { seatIds = UpdatedTicketReservationSeats });
+        using HttpResponseMessage updatedDownloadResponse = await SendAsUserAsync(
+            HttpMethod.Get,
+            $"/api/events/{eventId:D}/my-reservation/tickets");
+        byte[] updatedPdf = await updatedDownloadResponse.Content.ReadAsByteArrayAsync();
+        Assert.Equal(HttpStatusCode.OK, replaceResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, updatedDownloadResponse.StatusCode);
+        Assert.NotEqual(firstPdf.Length, updatedPdf.Length);
+
+        await using KapeldinerServiceDbContext cleanupContext = await _factory.CreateDbContextAsync();
+        EventItem eventToDelete = await cleanupContext.EventItems.SingleAsync(
+            item => item.Id == new EventItemId(eventId));
+        cleanupContext.EventItems.Remove(eventToDelete);
+        await cleanupContext.SaveChangesAsync();
     }
 
     [Fact]

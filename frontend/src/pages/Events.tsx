@@ -234,6 +234,8 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   const [seatMode, setSeatMode] = useState<'booking' | 'designation'>('booking');
   const [statusNotifications, setStatusNotifications] = useState<EventNotificationSummary | null>(null);
   const [statusNotificationAction, setStatusNotificationAction] = useState<'publish' | 'cancel' | null>(null);
+  const [ticketOptionsVisible, setTicketOptionsVisible] = useState(false);
+  const [ticketBusy, setTicketBusy] = useState<'download' | 'email' | null>(null);
 
   async function load() {
     setLoading(true);
@@ -345,6 +347,53 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     }
   }
 
+  async function downloadTickets() {
+    setTicketBusy('download');
+    setError(null);
+    try {
+      const response = await fetch(`/api/events/${eventId}/my-reservation/tickets`, { credentials: 'include' });
+      if (!response.ok) {
+        let code = 'REQUEST_FAILED';
+        let message = 'Не удалось скачать билеты.';
+        try {
+          const envelope = await response.json();
+          code = envelope.error?.code ?? code;
+          message = envelope.error?.message ?? message;
+        } catch { /* The server response was not a JSON error envelope. */ }
+        throw new ApiError(response.status, code, message);
+      }
+
+      const file = await response.blob();
+      const objectUrl = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `tickets-${eventId}.pdf`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      setTicketOptionsVisible(false);
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setTicketBusy(null);
+    }
+  }
+
+  async function emailTickets() {
+    setTicketBusy('email');
+    setError(null);
+    try {
+      const result = await api<{ email: string }>(`/api/events/${eventId}/my-reservation/tickets/email`, { method: 'POST' });
+      setMessage(`Билеты отправлены на ${result.email}.`);
+      setTicketOptionsVisible(false);
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setTicketBusy(null);
+    }
+  }
+
   async function changeDesignation(seatId: string, next: 'vip' | 'organization' | 'none') {
     if (!canAdminManage) return;
     setBusy(true);
@@ -395,6 +444,8 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   if (!event) return <PageFrame title="Мероприятие"><EmptyState title="Мероприятие не найдено" /></PageFrame>;
   const reserveCount = selectedSeats.size;
   const quota = admin ? quotas.find((item) => item.userId === selectedUserId) : event.myQuota;
+  const reservationMatchesSelection = myReservation?.seatIds.length === selectedSeats.size
+    && myReservation.seatIds.every((seatId) => selectedSeats.has(seatId));
 
   return (
     <PageFrame
@@ -456,6 +507,34 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
                 {myReservation?.seatIds.length ? <Button variant="danger" disabled={busy || !canBook} onClick={() => void cancelReservation()}>Отменить бронь</Button> : null}
                 <Button disabled={busy || !canBook || selectedSeats.size > (quota?.availableSeats ?? 0)} onClick={() => void saveReservation()}>{busy ? 'Сохраняем…' : myReservation?.seatIds.length ? 'Обновить бронь' : 'Подтвердить выбор'}</Button>
               </div>
+              {myReservation?.seatIds.length ? (
+                <div className="ticket-actions">
+                  {!ticketOptionsVisible ? (
+                    <Button
+                      variant="secondary"
+                      disabled={ticketBusy !== null || !reservationMatchesSelection}
+                      onClick={() => setTicketOptionsVisible(true)}
+                    >
+                      Получить билеты
+                    </Button>
+                  ) : (
+                    <>
+                      <p className="muted">Выберите, как получить билеты для {myReservation.seatIds.length} мест.</p>
+                      {!reservationMatchesSelection && <p className="helper-text">Сначала сохраните изменения выбранных мест.</p>}
+                      <div className="heading-actions">
+                        <Button variant="secondary" disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void downloadTickets()}>
+                          {ticketBusy === 'download' ? 'Готовим PDF…' : 'Скачать PDF'}
+                        </Button>
+                        <Button disabled={ticketBusy !== null || !reservationMatchesSelection} onClick={() => void emailTickets()}>
+                          {ticketBusy === 'email' ? 'Отправляем…' : 'Отправить на почту'}
+                        </Button>
+                        <Button variant="quiet" disabled={ticketBusy !== null} onClick={() => setTicketOptionsVisible(false)}>Отмена</Button>
+                      </div>
+                    </>
+                  )}
+                  {!reservationMatchesSelection && !ticketOptionsVisible && <p className="helper-text">Чтобы получить билеты для нового выбора, сначала сохраните бронирование.</p>}
+                </div>
+              ) : null}
             </section>
           )}
         </>

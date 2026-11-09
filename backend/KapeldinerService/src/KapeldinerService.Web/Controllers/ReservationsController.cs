@@ -7,6 +7,7 @@ using KapeldinerService.Infrastructure.Postgres.Authentication;
 using KapeldinerService.Web.Auth;
 using KapeldinerService.Web.Events;
 using KapeldinerService.Web.Reservations;
+using KapeldinerService.Web.Tickets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,8 +20,118 @@ namespace KapeldinerService.Web.Controllers;
 public sealed class ReservationsController(
     IDbContextFactory<KapeldinerServiceDbContext> contextFactory,
     EventCompletionService completionService,
-    TimeProvider timeProvider) : ControllerBase
+    TimeProvider timeProvider,
+    IEventTicketPdfGenerator ticketPdfGenerator,
+    IUserEmailSender emailSender) : ControllerBase
 {
+    [HttpGet("events/{eventId:guid}/my-reservation/tickets")]
+    [Authorize(Roles = AuthRoles.User)]
+    public async Task<IActionResult> DownloadMyTickets(Guid eventId, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+            return Unauthorized(ApiResponse.Failure<object>("UNAUTHENTICATED", "Требуется повторный вход."));
+
+        (IActionResult? error, TicketRequestData? ticketData) =
+            await LoadTicketRequestAsync(eventId, userId, cancellationToken);
+        if (error is not null)
+            return error;
+
+        byte[] pdf = ticketPdfGenerator.Generate(ticketData!.Tickets);
+        return File(pdf, "application/pdf", $"tickets-{eventId:N}.pdf");
+    }
+
+    [HttpPost("events/{eventId:guid}/my-reservation/tickets/email")]
+    [Authorize(Roles = AuthRoles.User)]
+    public async Task<IActionResult> EmailMyTickets(Guid eventId, CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+            return Unauthorized(ApiResponse.Failure<object>("UNAUTHENTICATED", "Требуется повторный вход."));
+
+        (IActionResult? error, TicketRequestData? ticketData) =
+            await LoadTicketRequestAsync(eventId, userId, cancellationToken);
+        if (error is not null)
+            return error;
+
+        byte[] pdf = ticketPdfGenerator.Generate(ticketData!.Tickets);
+        EmailSendResult sendResult = await emailSender.SendTicketsAsync(
+            ticketData.Email,
+            ticketData.Name,
+            ticketData.EventTitle,
+            pdf,
+            cancellationToken);
+        if (sendResult == EmailSendResult.NotConfigured)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                ApiResponse.Failure<object>("EMAIL_NOT_CONFIGURED", "Отправка электронной почты не настроена."));
+        }
+        if (sendResult == EmailSendResult.Failed)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway,
+                ApiResponse.Failure<object>("EMAIL_DELIVERY_FAILED", "Не удалось отправить письмо с билетами."));
+        }
+
+        return Ok(ApiResponse.Ok(new { email = ticketData.Email }));
+    }
+
+    private async Task<(IActionResult? Error, TicketRequestData? Data)> LoadTicketRequestAsync(
+        Guid eventId,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        await using KapeldinerServiceDbContext dbContext =
+            await contextFactory.CreateDbContextAsync(cancellationToken);
+        EventItem? eventItem = await dbContext.EventItems
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                item => item.Id == new EventItemId(eventId) && item.Status == StatusEvent.Published,
+                cancellationToken);
+        if (eventItem is null)
+        {
+            return (NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено.")), null);
+        }
+
+        EventQuota? quota = await dbContext.EventQuotas
+            .AsNoTracking()
+            .Include(item => item.Reservation)
+            .ThenInclude(reservation => reservation!.ReservationSeats)
+            .SingleOrDefaultAsync(
+                item => item.EventItemId == eventItem.Id && item.UserId == userId,
+                cancellationToken);
+        if (quota?.Reservation is null || quota.Reservation.ReservationSeats.Count == 0)
+        {
+            return (Conflict(ApiResponse.Failure<object>(
+                "RESERVATION_REQUIRED",
+                "Сначала забронируйте места, чтобы получить билеты.")), null);
+        }
+        if (quota.UsedSeats != quota.Reservation.ReservationSeats.Count)
+        {
+            return (Conflict(ApiResponse.Failure<object>(
+                "QUOTA_USAGE_INCONSISTENT",
+                "Использование квоты не совпадает с числом забронированных мест.")), null);
+        }
+
+        AuthUser? user = await dbContext.AuthUsers
+            .AsNoTracking()
+            .SingleOrDefaultAsync(account => account.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            return (NotFound(ApiResponse.Failure<object>("USER_NOT_FOUND", "Пользователь не найден.")), null);
+        }
+
+        EventTicketData[] tickets = quota.Reservation.ReservationSeats
+            .OrderBy(seat => string.Equals(seat.Seat.RowLabel, "12А", StringComparison.Ordinal)
+                ? 12.5
+                : seat.Seat.RowNumber)
+            .ThenBy(seat => seat.Seat.SeatNumber)
+            .Select(seat => new EventTicketData(
+                eventItem.Title!,
+                eventItem.StardAt,
+                seat.Seat.RowLabel,
+                seat.Seat.SeatNumber))
+            .ToArray();
+        return (null, new TicketRequestData(eventItem.Title!, user.Name, user.Email, tickets));
+    }
+
     [HttpGet("events/{eventId:guid}/my-reservation")]
     [Authorize(Roles = AuthRoles.User)]
     public async Task<IActionResult> GetMyReservation(Guid eventId, CancellationToken cancellationToken)
@@ -705,4 +816,10 @@ public sealed class ReservationsController(
         int AvailableSeats,
         int UsedSeats,
         int RemainingSeats);
+
+    private sealed record TicketRequestData(
+        string EventTitle,
+        string Name,
+        string Email,
+        IReadOnlyList<EventTicketData> Tickets);
 }

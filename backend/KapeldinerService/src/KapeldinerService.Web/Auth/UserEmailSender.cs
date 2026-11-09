@@ -31,6 +31,13 @@ public interface IUserEmailSender
         DateTimeOffset endAt,
         int availableSeats,
         CancellationToken cancellationToken);
+
+    Task<EmailSendResult> SendTicketsAsync(
+        string email,
+        string name,
+        string eventTitle,
+        byte[] pdf,
+        CancellationToken cancellationToken);
 }
 
 public enum EmailSendResult
@@ -102,11 +109,26 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
         return SendAsync(email, $"Мероприятие «{subjectTitle}» отменено", body, cancellationToken);
     }
 
+    public Task<EmailSendResult> SendTicketsAsync(
+        string email,
+        string name,
+        string eventTitle,
+        byte[] pdf,
+        CancellationToken cancellationToken)
+    {
+        string subjectTitle = eventTitle.Replace('\r', ' ').Replace('\n', ' ');
+        string body = $"Здравствуйте, {name}!\n\n"
+            + $"Во вложении ваши билеты на мероприятие «{eventTitle}».\n\n"
+            + "С уважением,\nКапельдинер";
+        return SendAsync(email, $"Билеты на мероприятие «{subjectTitle}»", body, cancellationToken, pdf);
+    }
+
     private async Task<EmailSendResult> SendAsync(
         string email,
         string subject,
         string body,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        byte[]? pdfAttachment = null)
     {
         string? host = configuration["Email:Smtp:Host"];
         string? fromAddress = configuration["Email:Smtp:FromAddress"];
@@ -138,6 +160,13 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
         {
             message.From = new MailAddress(fromAddress, fromName);
             message.To.Add(new MailAddress(email));
+            if (pdfAttachment is not null)
+            {
+                message.Attachments.Add(new Attachment(
+                    new MemoryStream(pdfAttachment, writable: false),
+                    "tickets.pdf",
+                    "application/pdf"));
+            }
         }
         catch (FormatException)
         {
