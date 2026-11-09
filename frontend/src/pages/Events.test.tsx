@@ -37,19 +37,43 @@ const emptyReservation: Reservation = {
   remainingSeats: 2,
 };
 
+let currentReservation = emptyReservation;
+
 beforeEach(() => {
+  currentReservation = emptyReservation;
   vi.mocked(api).mockImplementation(async <T,>(path: string): Promise<T> => {
     if (path === `/api/events/${event.eventId}`) return event as T;
     if (path === `/api/events/${event.eventId}/seats`) {
       return [{ seatId: '1-1', available: true }] satisfies UserSeat[] as T;
     }
-    if (path === `/api/events/${event.eventId}/my-reservation`) return emptyReservation as T;
+    if (path === `/api/events/${event.eventId}/my-reservation`) return currentReservation as T;
     throw new Error(`Unexpected API request: ${path}`);
   });
 });
 
 describe('EventDetailPage ticket controls', () => {
-  it('shows the ticket button even before a reservation exists', async () => {
+  it('hides the ticket button until the user has booked seats', async () => {
+    render(
+      <MemoryRouter initialEntries={[`/events/${event.eventId}`]}>
+        <Routes>
+          <Route path="/events/:eventId" element={<EventDetailPage mode="user" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole('heading', { name: 'Выберите места' });
+    expect(screen.queryByRole('button', { name: 'Получить билеты' })).not.toBeInTheDocument();
+  });
+
+  it('shows an active ticket button above the seat map when seats are booked', async () => {
+    currentReservation = {
+      ...emptyReservation,
+      reservationId: 'reservation-1',
+      seatIds: ['1-1'],
+      usedSeats: 1,
+      remainingSeats: 1,
+    };
+
     render(
       <MemoryRouter initialEntries={[`/events/${event.eventId}`]}>
         <Routes>
@@ -60,8 +84,11 @@ describe('EventDetailPage ticket controls', () => {
 
     const ticketButton = await screen.findByRole('button', { name: 'Получить билеты' });
     expect(ticketButton).toBeInTheDocument();
+    expect(ticketButton).toBeEnabled();
+    expect(ticketButton.closest('.section-heading')).toBeInTheDocument();
 
     fireEvent.click(ticketButton);
-    expect(screen.getByText('Сначала выберите места и сохраните бронирование.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Скачать PDF' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Отправить на почту' })).toBeEnabled();
   });
 });
