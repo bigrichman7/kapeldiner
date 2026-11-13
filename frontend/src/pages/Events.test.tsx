@@ -52,6 +52,88 @@ beforeEach(() => {
 });
 
 describe('EventDetailPage ticket controls', () => {
+  it('warns before deleting a draft and only deletes after confirmation', async () => {
+    const draftEvent = { ...event, status: 'draft' as const };
+    vi.mocked(api).mockImplementation(async <T,>(path: string, options?: RequestInit): Promise<T> => {
+      if (path === `/api/admin/events/${event.eventId}` && options?.method === 'DELETE') return undefined as T;
+      if (path === `/api/admin/events/${event.eventId}`) return draftEvent as T;
+      if (path === `/api/admin/events/${event.eventId}/statistics`) {
+        return {
+          eventId: event.eventId,
+          totalSeats: 0,
+          reservedSeats: 0,
+          unreservedSeats: 0,
+          userBookableSeats: 0,
+          allocatedQuotaSeats: 0,
+          usedQuotaSeats: 0,
+          remainingQuotaSeats: 0,
+          reservationCount: 0,
+          users: [],
+        } satisfies EventStatistics as T;
+      }
+      if (path === `/api/admin/events/${event.eventId}/quotas`
+        || path === `/api/admin/events/${event.eventId}/seats`
+        || path === `/api/admin/events/${event.eventId}/reservations`
+        || path === '/api/admin/users') return [] as T;
+      throw new Error(`Unexpected API request: ${path}`);
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <MemoryRouter initialEntries={[`/admin/events/${event.eventId}`]}>
+        <Routes>
+          <Route path="/admin/events/:eventId" element={<EventDetailPage mode="admin" />} />
+          <Route path="/admin/events" element={<div>Список мероприятий</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Удалить' }));
+
+    expect(confirm).toHaveBeenCalledWith(
+      'Удалить это мероприятие? Вся связанная с мероприятием информация о бронировании будет безвозвратно удалена.',
+    );
+    await screen.findByText('Список мероприятий');
+    expect(api).toHaveBeenCalledWith(`/api/admin/events/${event.eventId}`, { method: 'DELETE' });
+    confirm.mockRestore();
+  });
+
+  it('does not offer deletion while an event is published', async () => {
+    vi.mocked(api).mockImplementation(async <T,>(path: string): Promise<T> => {
+      if (path === `/api/admin/events/${event.eventId}`) return event as T;
+      if (path === `/api/admin/events/${event.eventId}/statistics`) {
+        return {
+          eventId: event.eventId,
+          totalSeats: 0,
+          reservedSeats: 0,
+          unreservedSeats: 0,
+          userBookableSeats: 0,
+          allocatedQuotaSeats: 0,
+          usedQuotaSeats: 0,
+          remainingQuotaSeats: 0,
+          reservationCount: 0,
+          users: [],
+        } satisfies EventStatistics as T;
+      }
+      if (path === `/api/admin/events/${event.eventId}/quotas`
+        || path === `/api/admin/events/${event.eventId}/seats`
+        || path === `/api/admin/events/${event.eventId}/reservations`
+        || path === '/api/admin/users') return [] as T;
+      throw new Error(`Unexpected API request: ${path}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/admin/events/${event.eventId}`]}>
+        <Routes>
+          <Route path="/admin/events/:eventId" element={<EventDetailPage mode="admin" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole('button', { name: 'Отменить' });
+    expect(screen.queryByRole('button', { name: 'Удалить' })).not.toBeInTheDocument();
+  });
+
   it('hides the ticket button until the user has booked seats', async () => {
     render(
       <MemoryRouter initialEntries={[`/events/${event.eventId}`]}>

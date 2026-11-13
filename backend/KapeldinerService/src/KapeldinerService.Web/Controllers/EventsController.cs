@@ -336,6 +336,31 @@ public sealed class EventsController(
             notifications)));
     }
 
+    [HttpDelete("admin/events/{eventId:guid}")]
+    [Authorize(Policy = "AdministratorOnly")]
+    public async Task<IActionResult> DeleteEvent(Guid eventId, CancellationToken cancellationToken)
+    {
+        await completionService.CompleteEndedEventsAsync(cancellationToken);
+        await using KapeldinerServiceDbContext dbContext =
+            await contextFactory.CreateDbContextAsync(cancellationToken);
+
+        int deleted = await dbContext.EventItems
+            .Where(item => item.Id == new EventItemId(eventId) && item.Status != StatusEvent.Published)
+            .ExecuteDeleteAsync(cancellationToken);
+        if (deleted == 0)
+        {
+            bool exists = await dbContext.EventItems
+                .AnyAsync(item => item.Id == new EventItemId(eventId), cancellationToken);
+            return exists
+                ? Conflict(ApiResponse.Failure<object>(
+                    "EVENT_MUST_BE_CANCELLED",
+                    "Сначала отмените опубликованное мероприятие."))
+                : NotFound(ApiResponse.Failure<object>("EVENT_NOT_FOUND", "Мероприятие не найдено."));
+        }
+
+        return Ok(ApiResponse.Ok(new { deleted = true }));
+    }
+
     private async Task<EventNotificationSummary> SendQuotaNotificationsAsync(
         EventItem eventItem,
         bool cancelled,

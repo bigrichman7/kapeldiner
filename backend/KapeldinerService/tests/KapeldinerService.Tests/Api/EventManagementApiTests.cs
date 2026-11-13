@@ -289,6 +289,73 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
     }
 
     [Fact]
+    public async Task AdministratorCanDeleteOnlyUnpublishedEventsAndTheirBookingData()
+    {
+        await PrepareDatabaseAsync();
+        DateTimeOffset startAt = DateTimeOffset.UtcNow.AddHours(2);
+        using HttpResponseMessage draftCreateResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = $"Draft performance {Guid.NewGuid():N}",
+                startAt,
+                endAt = startAt.AddHours(2)
+            });
+        using JsonDocument draftCreateBody =
+            await JsonDocument.ParseAsync(await draftCreateResponse.Content.ReadAsStreamAsync());
+        Guid draftEventId = draftCreateBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+        using HttpResponseMessage draftDeleteResponse = await SendAsAdminAsync(
+            HttpMethod.Delete,
+            $"/api/admin/events/{draftEventId:D}");
+        Assert.Equal(HttpStatusCode.Created, draftCreateResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, draftDeleteResponse.StatusCode);
+
+        using HttpResponseMessage createResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            "/api/admin/events",
+            new
+            {
+                title = $"Deletable performance {Guid.NewGuid():N}",
+                startAt,
+                endAt = startAt.AddHours(2),
+                quotas = new[] { new { userId = ExistingUserId, availableSeats = 2 } }
+            });
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid eventId = createBody.RootElement.GetProperty("data").GetProperty("eventId").GetGuid();
+        using HttpResponseMessage publishResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/publish");
+        using HttpResponseMessage bookingResponse = await SendAsAdminAsync(
+            HttpMethod.Put,
+            $"/api/admin/events/{eventId:D}/quotas/{ExistingUserId:D}/reservation",
+            new { seatIds = OccupiedReservationSeat });
+
+        using HttpResponseMessage publishedDeleteResponse = await SendAsAdminAsync(
+            HttpMethod.Delete,
+            $"/api/admin/events/{eventId:D}");
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, publishResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, bookingResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, publishedDeleteResponse.StatusCode);
+
+        using HttpResponseMessage cancelResponse = await SendAsAdminAsync(
+            HttpMethod.Post,
+            $"/api/admin/events/{eventId:D}/cancel");
+        using HttpResponseMessage deleteResponse = await SendAsAdminAsync(
+            HttpMethod.Delete,
+            $"/api/admin/events/{eventId:D}");
+        Assert.Equal(HttpStatusCode.OK, cancelResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, deleteResponse.StatusCode);
+
+        await using KapeldinerServiceDbContext verificationContext = await _factory.CreateDbContextAsync();
+        Assert.False(await verificationContext.EventItems.AnyAsync(item => item.Id == new EventItemId(eventId)));
+        Assert.False(await verificationContext.EventQuotas.AnyAsync(item => item.EventItemId == new EventItemId(eventId)));
+        Assert.False(await verificationContext.Set<Reservation>().AnyAsync(item => item.EventItemId == new EventItemId(eventId)));
+        Assert.False(await verificationContext.Set<ReservationSeat>().AnyAsync(item => item.EventItemId == new EventItemId(eventId)));
+    }
+
+    [Fact]
     public async Task FailedCancellationNotificationsDoNotUndoCancellationAndAreReported()
     {
         await PrepareDatabaseAsync();
