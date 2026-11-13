@@ -114,6 +114,34 @@ export interface EventStatistics {
   }>;
 }
 
+export interface AdminStatistics {
+  eventId: string | null;
+  events: Array<{
+    eventId: string;
+    title: string;
+    startAt: string;
+    status: string;
+  }>;
+  totalAllocatedQuotaSeats: number;
+  allocatedQuotaSeats: number;
+  bookedSeats: number;
+  verifiedSeats: number;
+  departments: Array<{
+    userId: string;
+    name: string | null;
+    allocatedSeats: number;
+    bookedSeats: number;
+    verifiedSeats: number;
+    tickets: Array<{
+      eventId: string;
+      eventTitle: string;
+      rowLabel: string;
+      seatNumber: number;
+      verifiedAtUtc: string;
+    }>;
+  }>;
+}
+
 export interface Envelope<T> {
   success: boolean;
   data: T | null;

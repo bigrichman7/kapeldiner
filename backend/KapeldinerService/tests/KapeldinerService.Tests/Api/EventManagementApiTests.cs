@@ -1058,6 +1058,108 @@ public sealed class EventManagementApiTests : IClassFixture<UserManagementApiFac
         await cleanupContext.SaveChangesAsync();
     }
 
+    [Fact]
+    public async Task AdminStatisticsAggregateAllEventsAndExposeOnlyVerifiedTicketsToAdministrators()
+    {
+        await PrepareDatabaseAsync();
+        Guid departmentId = Guid.NewGuid();
+        DateTime nowUtc = DateTime.UtcNow;
+        EventItem firstEvent = EventItem.Create(
+            "Statistics event one",
+            null,
+            nowUtc.AddHours(3),
+            nowUtc.AddHours(5),
+            nowUtc).Value;
+        EventItem secondEvent = EventItem.Create(
+            "Statistics event two",
+            null,
+            nowUtc.AddHours(6),
+            nowUtc.AddHours(8),
+            nowUtc).Value;
+        firstEvent.Publish(nowUtc);
+        secondEvent.Publish(nowUtc);
+
+        EventQuota firstQuota = EventQuota.Create(firstEvent.Id, departmentId, 4).Value;
+        EventQuota secondQuota = EventQuota.Create(secondEvent.Id, departmentId, 5).Value;
+        Reservation firstReservation = Reservation.Create(
+            firstEvent.Id,
+            departmentId,
+            [Seat.Create("1", 1, SeatType.booked).Value, Seat.Create("1", 2, SeatType.booked).Value],
+            firstQuota).Value;
+        Reservation secondReservation = Reservation.Create(
+            secondEvent.Id,
+            departmentId,
+            [Seat.Create("2", 1, SeatType.booked).Value],
+            secondQuota).Value;
+        firstQuota.ReserveSeats(2);
+        secondQuota.ReserveSeats(1);
+        firstReservation.ReservationSeats[0].MarkVerified(nowUtc);
+        secondReservation.ReservationSeats[0].MarkVerified(nowUtc);
+
+        int previousAllocatedSeats;
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            previousAllocatedSeats = await dbContext.EventQuotas
+                .Select(quota => (int?)quota.AvailableSeats)
+                .SumAsync() ?? 0;
+            dbContext.AuthUsers.Add(new AuthUser
+            {
+                Id = departmentId,
+                Login = $"statistics-{departmentId:N}",
+                NormalizedLogin = $"STATISTICS-{departmentId:N}".ToUpperInvariant(),
+                Name = "Statistics department",
+                Email = $"statistics-{departmentId:N}@example.com",
+                NormalizedEmail = $"STATISTICS-{departmentId:N}@EXAMPLE.COM".ToUpperInvariant(),
+                PasswordHash = "not-used",
+                Role = AuthRoles.User,
+                CreatedAtUtc = nowUtc
+            });
+            dbContext.EventItems.AddRange(firstEvent, secondEvent);
+            dbContext.EventQuotas.AddRange(firstQuota, secondQuota);
+            dbContext.Set<Reservation>().AddRange(firstReservation, secondReservation);
+            await dbContext.SaveChangesAsync();
+        }
+
+        using HttpResponseMessage allResponse = await SendAsAdminAsync(HttpMethod.Get, "/api/admin/statistics");
+        using JsonDocument allBody = await JsonDocument.ParseAsync(await allResponse.Content.ReadAsStreamAsync());
+        JsonElement allStatistics = allBody.RootElement.GetProperty("data");
+        JsonElement department = Assert.Single(allStatistics.GetProperty("departments").EnumerateArray());
+        Assert.Equal(HttpStatusCode.OK, allResponse.StatusCode);
+        Assert.Equal(previousAllocatedSeats + 9, allStatistics.GetProperty("totalAllocatedQuotaSeats").GetInt32());
+        Assert.Equal(9, allStatistics.GetProperty("allocatedQuotaSeats").GetInt32());
+        Assert.Equal(3, allStatistics.GetProperty("bookedSeats").GetInt32());
+        Assert.Equal(2, allStatistics.GetProperty("verifiedSeats").GetInt32());
+        Assert.Equal("Statistics department", department.GetProperty("name").GetString());
+        Assert.Equal(2, department.GetProperty("tickets").GetArrayLength());
+
+        using HttpResponseMessage eventResponse = await SendAsAdminAsync(
+            HttpMethod.Get,
+            $"/api/admin/statistics?eventId={firstEvent.Id.Value:D}");
+        using JsonDocument eventBody = await JsonDocument.ParseAsync(await eventResponse.Content.ReadAsStreamAsync());
+        JsonElement eventStatistics = eventBody.RootElement.GetProperty("data");
+        JsonElement eventDepartment = Assert.Single(eventStatistics.GetProperty("departments").EnumerateArray());
+        Assert.Equal(HttpStatusCode.OK, eventResponse.StatusCode);
+        Assert.Equal(previousAllocatedSeats + 9, eventStatistics.GetProperty("totalAllocatedQuotaSeats").GetInt32());
+        Assert.Equal(4, eventStatistics.GetProperty("allocatedQuotaSeats").GetInt32());
+        Assert.Equal(2, eventStatistics.GetProperty("bookedSeats").GetInt32());
+        Assert.Equal(1, eventStatistics.GetProperty("verifiedSeats").GetInt32());
+        Assert.Equal("1", eventDepartment.GetProperty("tickets")[0].GetProperty("rowLabel").GetString());
+        Assert.Equal(1, eventDepartment.GetProperty("tickets")[0].GetProperty("seatNumber").GetInt32());
+
+        using HttpResponseMessage forbiddenResponse =
+            await SendAsUserAsync(HttpMethod.Get, "/api/admin/statistics");
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+
+        await using KapeldinerServiceDbContext cleanupContext = await _factory.CreateDbContextAsync();
+        cleanupContext.EventItems.RemoveRange(
+            await cleanupContext.EventItems
+                .Where(item => item.Id == firstEvent.Id || item.Id == secondEvent.Id)
+                .ToArrayAsync());
+        AuthUser departmentUser = await cleanupContext.AuthUsers.SingleAsync(user => user.Id == departmentId);
+        cleanupContext.AuthUsers.Remove(departmentUser);
+        await cleanupContext.SaveChangesAsync();
+    }
+
     private async Task PrepareDatabaseAsync()
     {
         _factory.EmailSender.EventQuotaResult = EmailSendResult.Sent;
