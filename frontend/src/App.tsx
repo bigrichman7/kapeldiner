@@ -4,6 +4,7 @@ import { ApiError, api, signIn, signOut } from './api';
 import { EventDetailPage, EventListPage, EventFormPage } from './pages/Events';
 import { UserManagementPage } from './pages/Users';
 import { ProfilePage } from './pages/Profile';
+import { StatisticsPage } from './pages/Statistics';
 import { TicketVerificationPage } from './pages/TicketVerification';
 import type { Role, Session } from './types';
 import { Alert, Button, Loading, PageHeading } from './ui';
@@ -63,6 +64,7 @@ export function App() {
                 <Route path="/admin/events/:eventId" element={<EventDetailPage mode="admin" />} />
                 <Route path="/admin/events/:eventId/edit" element={<EventFormPage />} />
                 <Route path="/admin/users" element={<UserManagementPage />} />
+                <Route path="/admin/statistics" element={<StatisticsPage />} />
               </Route>
             </Route>
           </Route>
@@ -117,6 +119,7 @@ function AppLayout() {
             <>
               <Link to="/admin/events">Мероприятия</Link>
               <Link to="/admin/users">Пользователи</Link>
+              <Link to="/admin/statistics">Статистика</Link>
             </>
           ) : <Link to="/events">Мероприятия</Link>}
         </nav>
