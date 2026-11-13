@@ -4,6 +4,7 @@ import { ApiError, api, signIn, signOut } from './api';
 import { EventDetailPage, EventListPage, EventFormPage } from './pages/Events';
 import { UserManagementPage } from './pages/Users';
 import { ProfilePage } from './pages/Profile';
+import { TicketVerificationPage } from './pages/TicketVerification';
 import type { Role, Session } from './types';
 import { Alert, Button, Loading, PageHeading } from './ui';
 
@@ -48,6 +49,7 @@ export function App() {
     <AuthContext.Provider value={auth}>
       <BrowserRouter>
         <Routes>
+          <Route path="/ticket/:token" element={<TicketVerificationPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route element={<RequireAuth />}>
             <Route element={<AppLayout />}>

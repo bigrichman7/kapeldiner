@@ -182,6 +182,16 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("reserved_at");
 
+                    b.Property<string>("VerificationToken")
+                        .IsRequired()
+                        .HasMaxLength(43)
+                        .HasColumnType("character varying(43)")
+                        .HasColumnName("verification_token");
+
+                    b.Property<DateTime?>("VerifiedAtUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("verified_at_utc");
+
                     b.Property<string>("SeatKey")
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
@@ -217,6 +227,10 @@ namespace KapeldinerService.Infrastructure.Postgres.Migrations
                         .HasDatabaseName("ux_reservation_seat_event_seat");
 
                     b.HasIndex("ReservationId", "EventItemId");
+
+                    b.HasIndex("VerificationToken")
+                        .IsUnique()
+                        .HasDatabaseName("ux_reservation_seat_verification_token");
 
                     b.ToTable("reservation_seats", null, t =>
                         {

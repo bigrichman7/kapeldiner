@@ -22,5 +22,6 @@
     <PackageReference Include="Scalar.AspNetCore" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
     <PackageReference Include="QuestPDF" />
+    <PackageReference Include="QRCoder" />
   </ItemGroup>
 </Project>

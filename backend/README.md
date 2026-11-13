@@ -123,6 +123,11 @@ npm run dev
 Open the local URL printed by Vite. Its `/api` proxy forwards requests to the
 HTTPS Development API at `https://localhost:7282`; see the
 [frontend guide](../frontend/README.md) for frontend checks and account notes.
+Ticket QR codes in Development point to `http://localhost:5173/ticket/{token}`,
+where the frontend serves the public verification page. For deployments, set
+`Tickets:PublicBaseUrl` to the public frontend origin (for example,
+`https://tickets.example.org`) so generated ticket links do not point to the
+API host.
 
 ### Optional email delivery
 

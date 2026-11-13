@@ -95,6 +95,26 @@ approved requirements.
 - API work takes priority over UI work.
 - No application or API behavior is changed by this documentation issue.
 
+## Public ticket verification
+
+- Each reserved seat has its own persistent, cryptographically random ticket
+  token. The QR code is printed in the existing control box on the ticket and
+  opens `/ticket/{token}`.
+- Ticket verification is public and does not require sign-in. Anyone with the
+  ticket link can check it. The token is a bearer credential and must be kept
+  private like the ticket itself.
+- Scans more than five hours before the event start show the early-scan message
+  without consuming the ticket. At or after that five-hour boundary, the first
+  scan marks the ticket verified; later scans report that it was already
+  verified. The update is atomic so simultaneous scans cannot both succeed.
+- Unknown tickets and tickets for draft or cancelled events are reported as
+  not found.
+- `robots.txt` disallows crawler access, and the application emits `noindex`
+  metadata. These are crawler directives, not access control; public ticket
+  links remain accessible to anyone who has them.
+- Database deployments must apply migration
+  `20261109203000_AddTicketVerification`.
+
 ## MVP model
 
 The confirmed conceptual model is:

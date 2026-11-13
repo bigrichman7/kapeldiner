@@ -90,6 +90,7 @@ app.UseAuthorization();
 
 // Minimal API endpoints
 app.MapGet("/", () => "Капельдинер: сервис работает!");
+app.MapGet("/robots.txt", () => Results.Text("User-agent: *\nDisallow: /\n", "text/plain"));
 
 app.MapHealthChecks("/api/health");
 

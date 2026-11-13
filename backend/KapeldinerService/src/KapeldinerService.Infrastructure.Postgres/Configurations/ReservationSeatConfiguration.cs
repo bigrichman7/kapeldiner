@@ -49,6 +49,17 @@ public class ReservationSeatConfiguration : IEntityTypeConfiguration<Reservation
             .Property(rs => rs.ReservedAt)
             .HasColumnName("reserved_at");
 
+        builder.Property(rs => rs.VerificationToken)
+            .HasMaxLength(43)
+            .HasColumnName("verification_token");
+
+        builder.Property(rs => rs.VerifiedAtUtc)
+            .HasColumnName("verified_at_utc");
+
+        builder.HasIndex(rs => rs.VerificationToken)
+            .IsUnique()
+            .HasDatabaseName("ux_reservation_seat_verification_token");
+
         builder.Property(rs => rs.SeatKey)
             .HasComputedColumnSql("row_label || '-' || seat_number", stored: true)
             .HasColumnName("seat_key");

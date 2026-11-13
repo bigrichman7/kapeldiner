@@ -24,6 +24,7 @@
     <!-- Health checks -->
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.7" />
     <PackageVersion Include="QuestPDF" Version="2025.7.4" />
+    <PackageVersion Include="QRCoder" Version="1.6.0" />
     <!-- Tests -->
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.7" />
     <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.14" />

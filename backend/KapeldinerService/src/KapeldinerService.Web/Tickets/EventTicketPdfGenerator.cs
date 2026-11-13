@@ -3,10 +3,16 @@ using System.Reflection;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
+using QRCoder;
 
 namespace KapeldinerService.Web.Tickets;
 
-public sealed record EventTicketData(string EventTitle, DateTime StartAtUtc, string RowLabel, int SeatNumber);
+public sealed record EventTicketData(
+    string EventTitle,
+    DateTime StartAtUtc,
+    string RowLabel,
+    int SeatNumber,
+    Uri VerificationUrl);
 
 public interface IEventTicketPdfGenerator
 {
@@ -52,6 +58,10 @@ public sealed class EventTicketPdfGenerator : IEventTicketPdfGenerator
             MoscowTimeZone);
         string eventDate = eventTime.ToString("dd MMMM yyyy 'года'", RussianCulture);
         string eventClock = eventTime.ToString("HH:mm", RussianCulture);
+        using QRCodeGenerator qrGenerator = new();
+        using QRCodeData qrCodeData = qrGenerator.CreateQrCode(ticket.VerificationUrl.AbsoluteUri, QRCodeGenerator.ECCLevel.Q);
+        using PngByteQRCode qrCode = new(qrCodeData);
+        byte[] qrCodeImage = qrCode.GetGraphic(6);
 
         container
             .Border(1)
@@ -96,13 +106,8 @@ public sealed class EventTicketPdfGenerator : IEventTicketPdfGenerator
                             .AlignCenter()
                             .Width(44)
                             .Height(44)
-                            .Border(1)
-                            .BorderColor(Colors.Grey.Darken1)
-                            .AlignCenter()
-                            .AlignMiddle()
-                            .Text("QR-код")
-                            .FontSize(7)
-                            .FontColor(Colors.Grey.Darken1);
+                            .Image(qrCodeImage)
+                            .FitArea();
                         column.Item().AlignCenter().Text("М.П.").FontSize(11).Bold();
                     });
             });
