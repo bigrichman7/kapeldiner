@@ -168,7 +168,7 @@ public sealed class ReservationsController(
             return (NotFound(ApiResponse.Failure<object>("USER_NOT_FOUND", "Пользователь не найден.")), null);
         }
 
-        string publicBaseUrl = configuration["Tickets:PublicBaseUrl"]
+        string publicBaseUrl = configuration["PublicBaseUrl"]
             ?? $"{Request.Scheme}://{Request.Host}{Request.PathBase}";
         Uri publicBaseUri = new(publicBaseUrl, UriKind.Absolute);
         EventTicketData[] tickets = quota.Reservation.ReservationSeats
