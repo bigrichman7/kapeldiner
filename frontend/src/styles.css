@@ -216,6 +216,16 @@ td strong { color: var(--ink); }
 .login-card > .muted { margin-bottom: 25px; font-size: .9rem; }
 .login-footnote { margin: 22px 0 0; color: #8b958e; text-align: center; font-size: .75rem; }
 
+.ticket-verification-page { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: var(--wash); }
+.ticket-verification-card { width: min(100%, 560px); padding: 34px; border: 1px solid var(--line); border-radius: 16px; background: white; box-shadow: var(--shadow); text-align: center; }
+.ticket-verification-card p { margin: 18px 0 0; color: var(--ink); font-size: 1.05rem; line-height: 1.6; }
+.ticket-verification-card .ticket-verification-note { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); color: var(--muted); font-size: .94rem; }
+.ticket-verification-icon { display: grid; width: 58px; height: 58px; place-items: center; margin: 0 auto; font-size: 2.3rem; font-weight: 800; line-height: 1; }
+.ticket-verification-tooEarly .ticket-verification-icon { color: #111; }
+.ticket-verification-verified .ticket-verification-icon { color: #24833d; }
+.ticket-verification-alreadyVerified .ticket-verification-icon { color: #e58b24; }
+.ticket-verification-notFound .ticket-verification-icon { color: #bd3434; }
+
 @media (max-width: 1000px) {
   .event-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .user-admin-layout { grid-template-columns: 1fr; }

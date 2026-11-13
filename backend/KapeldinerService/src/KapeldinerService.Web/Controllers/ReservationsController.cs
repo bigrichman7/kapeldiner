@@ -22,7 +22,8 @@ public sealed class ReservationsController(
     EventCompletionService completionService,
     TimeProvider timeProvider,
     IEventTicketPdfGenerator ticketPdfGenerator,
-    IUserEmailSender emailSender) : ControllerBase
+    IUserEmailSender emailSender,
+    IConfiguration configuration) : ControllerBase
 {
     [HttpGet("events/{eventId:guid}/my-reservation/tickets")]
     [Authorize(Roles = AuthRoles.User)]
@@ -167,6 +168,9 @@ public sealed class ReservationsController(
             return (NotFound(ApiResponse.Failure<object>("USER_NOT_FOUND", "Пользователь не найден.")), null);
         }
 
+        string publicBaseUrl = configuration["Tickets:PublicBaseUrl"]
+            ?? $"{Request.Scheme}://{Request.Host}{Request.PathBase}";
+        Uri publicBaseUri = new(publicBaseUrl, UriKind.Absolute);
         EventTicketData[] tickets = quota.Reservation.ReservationSeats
             .OrderBy(seat => string.Equals(seat.Seat.RowLabel, "12А", StringComparison.Ordinal)
                 ? 12.5
@@ -176,7 +180,8 @@ public sealed class ReservationsController(
                 eventItem.Title!,
                 eventItem.StardAt,
                 seat.Seat.RowLabel,
-                seat.Seat.SeatNumber))
+                seat.Seat.SeatNumber,
+                new Uri(publicBaseUri, $"ticket/{Uri.EscapeDataString(seat.VerificationToken)}")))
             .ToArray();
         return (null, new TicketRequestData(eventItem.Title!, user.Name, user.Email, tickets));
     }
