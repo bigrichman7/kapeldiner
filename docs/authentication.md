@@ -18,10 +18,12 @@ authenticated users can read and update their own profile.
 | `GET` | `/api/admin/session` | Administrator | Example route protected by the administrator policy. |
 | `GET` | `/api/users/me` | Authenticated | Read the current user's profile. |
 | `PUT` | `/api/users/me` | Authenticated | Update the current user's login, name, and email. |
+| `POST` | `/api/users/me/password` | Authenticated + CSRF token | Change the current user's password after verifying the current password. |
 | `GET` | `/api/admin/users` | Administrator | List user profiles. |
 | `GET` | `/api/admin/users/{id}` | Administrator | Read a user profile. |
 | `POST` | `/api/admin/users` | Administrator | Create a user and email their generated permanent password. |
 | `PUT` | `/api/admin/users/{id}` | Administrator | Update a user's login, name, and email. |
+| `POST` | `/api/admin/users/{id}/password` | Administrator + CSRF token | Generate and email a new password without requiring the old one. |
 | `DELETE` | `/api/admin/users/{id}` | Administrator | Delete a non-administrator account and revoke its sessions. |
 
 User login and email are separately stored, normalized case-insensitively, and
@@ -30,6 +32,14 @@ administrator, so role changes are not exposed; profile requests never accept
 a role or password. A user can only access `/api/users/me`, not another
 account's identifier. Changing a login revokes that user's existing sessions;
 they must sign in with the new login.
+Users can change their password by providing the current password and a new
+password of 6–1024 characters; no other password complexity rules apply.
+Changing or resetting a password revokes all of the account's sessions, so the
+user must sign in again. An administrator can request a password reset for any
+account; the service generates a cryptographically random password and emails
+it to the account's saved email address. If SMTP is missing or delivery fails,
+the password change is rolled back and the API returns `503
+EMAIL_NOT_CONFIGURED` or `502 EMAIL_DELIVERY_FAILED`.
 The migration preserves existing logins, copies them into the profile name,
 and assigns a `{login}@invalid.local` placeholder email; update that email
 before relying on account email delivery.
@@ -44,7 +54,9 @@ fails, it returns `502 EMAIL_DELIVERY_FAILED`. In either case the user insert
 is rolled back and no account is created. The generated permanent password is
 a cryptographically random 8-character Base64Url string, is stored only as an
 ASP.NET Core Identity password hash, and is never logged or returned by the
-API. The email sends it as plaintext, which remains a material
+API. Administrator password resets use the same generated-password format,
+email settings, and rollback behavior. Passwords are emailed as plaintext,
+which remains a material
 account-compromise risk; use a one-time password setup link instead when the
 product requirement permits.
 SMTP delivery and PostgreSQL commit cannot be one atomic operation: in the

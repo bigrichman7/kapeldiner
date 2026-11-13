@@ -41,17 +41,17 @@ public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFact
     {
         await _factory.EnsureDatabaseCreatedAsync();
         _factory.EmailSender.Result = EmailSendResult.Failed;
+        string login = $"delivery-{Guid.NewGuid():N}"[..18];
+        string email = $"delivery-{Guid.NewGuid():N}@example.com";
 
-        using HttpResponseMessage response = await CreateUserAsync(
-            $"delivery-{Guid.NewGuid():N}"[..18],
-            $"delivery-{Guid.NewGuid():N}@example.com",
-            "Delivery Failure");
+        using HttpResponseMessage response = await CreateUserAsync(login, email, "Delivery Failure");
         using JsonDocument body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
 
         await using KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync();
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
         Assert.Equal("EMAIL_DELIVERY_FAILED", body.RootElement.GetProperty("error").GetProperty("code").GetString());
-        Assert.Equal(0, await dbContext.AuthUsers.CountAsync());
+        Assert.False(await dbContext.AuthUsers.AnyAsync(user =>
+            user.Login == login || user.Email == email));
         Assert.False(string.IsNullOrEmpty(_factory.EmailSender.LastPassword));
         Assert.DoesNotContain(_factory.EmailSender.LastPassword!, body.RootElement.GetRawText(), StringComparison.Ordinal);
     }
@@ -98,6 +98,113 @@ public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFact
         Assert.Equal(HttpStatusCode.Conflict, duplicateEmailResponse.StatusCode);
         Assert.Equal("EMAIL_ALREADY_EXISTS",
             duplicateEmailBody.RootElement.GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task CurrentUserCanChangePasswordWithCurrentPasswordAndSixCharactersMinimum()
+    {
+        await _factory.EnsureDatabaseCreatedAsync();
+        IPasswordHasher<AuthUser> passwordHasher = _factory.Services.GetRequiredService<IPasswordHasher<AuthUser>>();
+        await using (KapeldinerServiceDbContext dbContext = await _factory.CreateDbContextAsync())
+        {
+            AuthUser? user = await dbContext.AuthUsers.SingleOrDefaultAsync(
+                account => account.Id == Guid.Parse(ExistingUserId));
+            if (user is null)
+            {
+                user = new AuthUser
+                {
+                    Id = Guid.Parse(ExistingUserId),
+                    Login = "member",
+                    NormalizedLogin = "MEMBER",
+                    Name = "Member",
+                    Email = "member@example.com",
+                    NormalizedEmail = "MEMBER@EXAMPLE.COM",
+                    PasswordHash = string.Empty,
+                    Role = AuthRoles.User,
+                    CreatedAtUtc = DateTime.UtcNow
+                };
+                dbContext.AuthUsers.Add(user);
+            }
+
+            user.PasswordHash = passwordHasher.HashPassword(user, "old-password");
+            await dbContext.SaveChangesAsync();
+        }
+
+        using HttpResponseMessage invalidCurrentPasswordResponse = await SendUnsafeAsUserAsync(
+            HttpMethod.Post,
+            "/api/users/me/password",
+            new { currentPassword = "wrong-password", newPassword = "new-password" });
+        using JsonDocument invalidCurrentPasswordBody =
+            await JsonDocument.ParseAsync(await invalidCurrentPasswordResponse.Content.ReadAsStreamAsync());
+        using HttpResponseMessage shortPasswordResponse = await SendUnsafeAsUserAsync(
+            HttpMethod.Post,
+            "/api/users/me/password",
+            new { currentPassword = "old-password", newPassword = "12345" });
+        using JsonDocument shortPasswordBody =
+            await JsonDocument.ParseAsync(await shortPasswordResponse.Content.ReadAsStreamAsync());
+        using HttpResponseMessage validResponse = await SendUnsafeAsUserAsync(
+            HttpMethod.Post,
+            "/api/users/me/password",
+            new { currentPassword = "old-password", newPassword = "a <>  " });
+        using JsonDocument validBody = await JsonDocument.ParseAsync(await validResponse.Content.ReadAsStreamAsync());
+        await using KapeldinerServiceDbContext verificationContext = await _factory.CreateDbContextAsync();
+        AuthUser updatedUser = await verificationContext.AuthUsers.SingleAsync(
+            account => account.Id == Guid.Parse(ExistingUserId));
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalidCurrentPasswordResponse.StatusCode);
+        Assert.Equal("CURRENT_PASSWORD_INVALID",
+            invalidCurrentPasswordBody.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, shortPasswordResponse.StatusCode);
+        Assert.Equal("VALIDATION_FAILED",
+            shortPasswordBody.RootElement.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.OK, validResponse.StatusCode);
+        Assert.True(validBody.RootElement.GetProperty("data").GetProperty("sessionsRevoked").GetBoolean());
+        Assert.Equal(PasswordVerificationResult.Success,
+            passwordHasher.VerifyHashedPassword(updatedUser, updatedUser.PasswordHash, "a <>  "));
+    }
+
+    [Fact]
+    public async Task AdministratorCanResetPasswordAndFailedEmailDoesNotChangeIt()
+    {
+        await _factory.EnsureDatabaseCreatedAsync();
+        _factory.EmailSender.Result = EmailSendResult.Sent;
+        string login = $"reset-{Guid.NewGuid():N}"[..18];
+        string email = $"reset-{Guid.NewGuid():N}@example.com";
+        using HttpResponseMessage createResponse = await CreateUserAsync(
+            login,
+            email,
+            "Password Reset User");
+        using JsonDocument createBody = await JsonDocument.ParseAsync(await createResponse.Content.ReadAsStreamAsync());
+        Guid userId = createBody.RootElement.GetProperty("data").GetProperty("id").GetGuid();
+        IPasswordHasher<AuthUser> passwordHasher = _factory.Services.GetRequiredService<IPasswordHasher<AuthUser>>();
+        string resetPath = $"/api/admin/users/{userId:D}/password";
+
+        using HttpResponseMessage forbiddenResponse = await SendUnsafeAsUserAsync(
+            HttpMethod.Post, resetPath, new { });
+        using HttpResponseMessage resetResponse = await SendUnsafeAsAdminAsync(
+            HttpMethod.Post, resetPath, new { });
+        using JsonDocument resetBody = await JsonDocument.ParseAsync(await resetResponse.Content.ReadAsStreamAsync());
+        await using KapeldinerServiceDbContext verificationContext = await _factory.CreateDbContextAsync();
+        AuthUser resetUser = await verificationContext.AuthUsers.SingleAsync(user => user.Id == userId);
+        string sentPassword = _factory.EmailSender.LastPassword!;
+        string resetHash = resetUser.PasswordHash;
+
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, resetResponse.StatusCode);
+        Assert.Equal(email, _factory.EmailSender.LastEmail);
+        Assert.Matches(@"^[A-Za-z0-9_-]{8}$", sentPassword);
+        Assert.Equal(PasswordVerificationResult.Success,
+            passwordHasher.VerifyHashedPassword(resetUser, resetUser.PasswordHash, sentPassword));
+        Assert.DoesNotContain(sentPassword, resetBody.RootElement.GetRawText(), StringComparison.Ordinal);
+
+        _factory.EmailSender.Result = EmailSendResult.Failed;
+        using HttpResponseMessage failedResetResponse = await SendUnsafeAsAdminAsync(
+            HttpMethod.Post, resetPath, new { });
+        await using KapeldinerServiceDbContext failedVerificationContext = await _factory.CreateDbContextAsync();
+        AuthUser unchangedUser = await failedVerificationContext.AuthUsers.SingleAsync(user => user.Id == userId);
+
+        Assert.Equal(HttpStatusCode.BadGateway, failedResetResponse.StatusCode);
+        Assert.Equal(resetHash, unchangedUser.PasswordHash);
     }
 
     [Fact]
@@ -275,8 +382,25 @@ public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFact
         string path,
         object? body = null)
     {
+        return await SendUnsafeAsRoleAsync(AuthRoles.Administrator, method, path, body);
+    }
+
+    private async Task<HttpResponseMessage> SendUnsafeAsUserAsync(
+        HttpMethod method,
+        string path,
+        object? body = null)
+    {
+        return await SendUnsafeAsRoleAsync(AuthRoles.User, method, path, body);
+    }
+
+    private async Task<HttpResponseMessage> SendUnsafeAsRoleAsync(
+        string role,
+        HttpMethod method,
+        string path,
+        object? body = null)
+    {
         using var tokenRequest = new HttpRequestMessage(HttpMethod.Get, "/api/auth/csrf");
-        tokenRequest.Headers.Add(TestRoleHeader, AuthRoles.Administrator);
+        tokenRequest.Headers.Add(TestRoleHeader, role);
         using HttpResponseMessage tokenResponse = await _client.SendAsync(tokenRequest);
         using JsonDocument tokenBody = await JsonDocument.ParseAsync(await tokenResponse.Content.ReadAsStreamAsync());
         string requestToken = tokenBody.RootElement.GetProperty("data").GetProperty("requestToken").GetString()!;
@@ -285,7 +409,7 @@ public sealed class UserManagementApiTests : IClassFixture<UserManagementApiFact
         {
             Content = body is null ? null : JsonContent.Create(body)
         };
-        request.Headers.Add(TestRoleHeader, AuthRoles.Administrator);
+        request.Headers.Add(TestRoleHeader, role);
         request.Headers.Add("X-CSRF-TOKEN", requestToken);
         return await _client.SendAsync(request);
     }
@@ -370,6 +494,8 @@ public sealed class TestUserEmailSender : IUserEmailSender
 
     public string? LastPassword { get; private set; }
 
+    public string? LastEmail { get; private set; }
+
     public ICollection<EventQuotaEmailRequest> EventQuotaEmails { get; } =
         new System.Collections.ObjectModel.Collection<EventQuotaEmailRequest>();
 
@@ -391,6 +517,18 @@ public sealed class TestUserEmailSender : IUserEmailSender
         CancellationToken cancellationToken)
     {
         LastPassword = password;
+        LastEmail = email;
+        return Task.FromResult(Result);
+    }
+
+    public Task<EmailSendResult> SendPasswordResetAsync(
+        string email,
+        string name,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        LastPassword = password;
+        LastEmail = email;
         return Task.FromResult(Result);
     }
 

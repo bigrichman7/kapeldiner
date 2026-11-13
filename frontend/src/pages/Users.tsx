@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import { PageFrame } from '../App';
+import { PageFrame, useAuth } from '../App';
 import type { UserProfile } from '../types';
 import { Alert, Button, EmptyState, ErrorMessage, FieldError, Loading } from '../ui';
 
@@ -13,11 +14,14 @@ interface UserFormValues {
 const emptyForm: UserFormValues = { login: '', email: '', name: '' };
 
 export function UserManagementPage() {
+  const { session, setSession } = useAuth();
+  const navigate = useNavigate();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [form, setForm] = useState<UserFormValues>(emptyForm);
   const [editingId, setEditingId] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [resettingId, setResettingId] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [success, setSuccess] = useState('');
 
@@ -84,6 +88,30 @@ export function UserManagementPage() {
     }
   }
 
+  async function resetUserPassword(user: UserProfile) {
+    if (!window.confirm(`Сменить пароль пользователя «${user.name}» и отправить новый пароль на ${user.email}?`)) return;
+    setError(null);
+    setSuccess('');
+    setResettingId(user.id);
+    try {
+      await api<{ passwordReset: boolean }>(`/api/admin/users/${user.id}/password`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setSuccess(`Новый пароль отправлен пользователю ${user.name} на ${user.email}.`);
+      if (session?.id === user.id) {
+        window.setTimeout(() => {
+          setSession(null);
+          navigate('/login', { replace: true });
+        }, 1200);
+      }
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setResettingId('');
+    }
+  }
+
   return (
     <PageFrame title="Пользователи" description="Учётные записи участников и доступ к мероприятиям.">
       <div className="user-admin-layout">
@@ -94,7 +122,7 @@ export function UserManagementPage() {
               {users.map((user) => <tr key={user.id}>
                 <td><strong>{user.name}</strong>{user.role === 'Administrator' && <span className="role-pill">Администратор</span>}</td>
                 <td>{user.login}</td><td>{user.email}</td>
-                <td><div className="row-actions"><Button variant="quiet" onClick={() => beginEdit(user)}>Изменить</Button>{user.role === 'User' && <Button variant="quiet" onClick={() => void deleteUser(user)}>Удалить</Button>}</div></td>
+                <td><div className="row-actions"><Button variant="quiet" onClick={() => beginEdit(user)}>Изменить</Button><Button variant="quiet" disabled={resettingId === user.id} onClick={() => void resetUserPassword(user)}>{resettingId === user.id ? 'Отправляем…' : 'Сменить пароль'}</Button>{user.role === 'User' && <Button variant="quiet" onClick={() => void deleteUser(user)}>Удалить</Button>}</div></td>
               </tr>)}
             </tbody></table></div>
           )}

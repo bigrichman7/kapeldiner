@@ -86,6 +86,41 @@ public sealed partial class UsersController(
         return Ok(ApiResponse.Ok(new ProfileUpdateResponse(ToResponse(user), loginChanged)));
     }
 
+    [HttpPost("users/me/password")]
+    [Authorize]
+    public async Task<IActionResult> ChangeCurrentUserPassword(
+        [FromBody] ChangePasswordRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCurrentUserId(out Guid userId))
+        {
+            return Unauthorized(ApiResponse.Failure<object>("UNAUTHENTICATED", "Требуется повторный вход."));
+        }
+
+        if (string.IsNullOrEmpty(request.CurrentPassword) || !IsValidPassword(request.NewPassword))
+        {
+            return BadRequest(PasswordValidationError(request));
+        }
+
+        await using KapeldinerServiceDbContext dbContext = await contextFactory.CreateDbContextAsync(cancellationToken);
+        AuthUser? user = await dbContext.AuthUsers.SingleOrDefaultAsync(account => account.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            return NotFound(ApiResponse.Failure<object>("USER_NOT_FOUND", "Пользователь не найден."));
+        }
+
+        if (passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword)
+            == PasswordVerificationResult.Failed)
+        {
+            return BadRequest(ApiResponse.Failure<object>("CURRENT_PASSWORD_INVALID", "Текущий пароль указан неверно."));
+        }
+
+        user.PasswordHash = passwordHasher.HashPassword(user, request.NewPassword!);
+        await RevokeUserSessionsAsync(dbContext, userId, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(ApiResponse.Ok(new { sessionsRevoked = true }));
+    }
+
     [HttpGet("admin/users")]
     [Authorize(Policy = "AdministratorOnly")]
     public async Task<IActionResult> GetUsers(CancellationToken cancellationToken)
@@ -216,6 +251,47 @@ public sealed partial class UsersController(
         return Ok(ApiResponse.Ok(new ProfileUpdateResponse(ToResponse(user), loginChanged)));
     }
 
+    [HttpPost("admin/users/{id:guid}/password")]
+    [Authorize(Policy = "AdministratorOnly")]
+    public async Task<IActionResult> ResetUserPassword(Guid id, CancellationToken cancellationToken)
+    {
+        await using KapeldinerServiceDbContext dbContext = await contextFactory.CreateDbContextAsync(cancellationToken);
+        AuthUser? user = await dbContext.AuthUsers.SingleOrDefaultAsync(account => account.Id == id, cancellationToken);
+        if (user is null)
+        {
+            return NotFound(ApiResponse.Failure<object>("USER_NOT_FOUND", "Пользователь не найден."));
+        }
+
+        string password = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(6));
+        user.PasswordHash = passwordHasher.HashPassword(user, password);
+
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction =
+            await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await RevokeUserSessionsAsync(dbContext, id, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        EmailSendResult emailResult = await emailSender.SendPasswordResetAsync(
+            user.Email, user.Name, password, cancellationToken);
+        if (emailResult == EmailSendResult.NotConfigured)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            LogEmailNotConfigured(logger);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                ApiResponse.Failure<object>("EMAIL_NOT_CONFIGURED", "Отправка электронной почты не настроена; пароль не изменен."));
+        }
+
+        if (emailResult == EmailSendResult.Failed)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            LogEmailDeliveryFailed(logger);
+            return StatusCode(StatusCodes.Status502BadGateway,
+                ApiResponse.Failure<object>("EMAIL_DELIVERY_FAILED", "Не удалось отправить письмо; пароль не изменен."));
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return Ok(ApiResponse.Ok(new { passwordReset = true, sessionsRevoked = true }));
+    }
+
     [HttpDelete("admin/users/{id:guid}")]
     [Authorize(Policy = "AdministratorOnly")]
     public async Task<IActionResult> DeleteUser(Guid id, CancellationToken cancellationToken)
@@ -287,6 +363,26 @@ public sealed partial class UsersController(
 
     private static ApiEnvelope<object> UniqueConflictBody() =>
         ApiResponse.Failure<object>("USER_UNIQUE_CONFLICT", "Логин или email уже используется.");
+
+    private static bool IsValidPassword(string? password) =>
+        !string.IsNullOrEmpty(password) && password.Length is >= 6 and <= 1024;
+
+    private static ApiEnvelope<object> PasswordValidationError(ChangePasswordRequest request)
+    {
+        var fields = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(request.CurrentPassword))
+        {
+            fields["currentPassword"] = ["Укажите текущий пароль."];
+        }
+
+        if (!IsValidPassword(request.NewPassword))
+        {
+            fields["newPassword"] = ["Пароль должен содержать от 6 до 1024 символов."];
+        }
+
+        return new ApiEnvelope<object>(false, default,
+            new ApiError("VALIDATION_FAILED", "Проверьте введенные данные.", fields));
+    }
 
 
     private static bool TryNormalize(
@@ -386,6 +482,8 @@ public sealed partial class UsersController(
     private static partial void LogEmailDeliveryFailed(ILogger logger);
 
     public sealed record UserProfileRequest(string? Login, string? Email, string? Name);
+
+    public sealed record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
 
     public sealed record UserResponse(Guid Id, string Login, string Email, string Name, string Role, DateTime CreatedAtUtc);
 
