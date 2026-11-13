@@ -14,6 +14,12 @@ public interface IUserEmailSender
         string password,
         CancellationToken cancellationToken);
 
+    Task<EmailSendResult> SendPasswordResetAsync(
+        string email,
+        string name,
+        string password,
+        CancellationToken cancellationToken);
+
     Task<EmailSendResult> SendEventQuotaAsync(
         string email,
         string name,
@@ -62,6 +68,19 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
             + "Это постоянный пароль для учетной записи.";
 
         return await SendAsync(email, "Доступ к Капельдинеру", body, cancellationToken);
+    }
+
+    public Task<EmailSendResult> SendPasswordResetAsync(
+        string email,
+        string name,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        string body = $"Здравствуйте, {name}!\n\n"
+            + $"Администратор сменил пароль вашей учетной записи. Новый пароль: {password}\n\n"
+            + "Если вы не ожидали этого письма, обратитесь к администратору.";
+
+        return SendAsync(email, "Новый пароль для Капельдинера", body, cancellationToken);
     }
 
     public Task<EmailSendResult> SendEventQuotaAsync(

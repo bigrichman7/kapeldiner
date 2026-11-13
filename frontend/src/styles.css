@@ -208,6 +208,9 @@ td strong { color: var(--ink); }
 .role-pill { display: inline-block; margin: 6px 0 0 7px; font-size: .65rem; }
 .profile-meta { display: flex; justify-content: space-between; padding: 13px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
 .profile-meta strong { color: var(--ink); }
+.password-section { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
+.password-section h2 { margin-bottom: 5px; }
+.password-section > .helper-text { margin: 0 0 18px; }
 
 .login-page { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: radial-gradient(ellipse at 16% 16%, #e6edf5 0, transparent 35%), radial-gradient(ellipse at 85% 90%, #e9eef4 0, transparent 30%), var(--wash); }
 .login-card { width: min(100%, 430px); padding: 38px; border: 1px solid rgb(222 230 238 / 90%); border-radius: 19px; background: white; box-shadow: 0 24px 70px rgb(38 59 84 / 10%); }

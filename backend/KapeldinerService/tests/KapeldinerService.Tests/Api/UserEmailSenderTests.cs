@@ -21,6 +21,20 @@ public sealed class UserEmailSenderTests
     }
 
     [Fact]
+    public async Task MissingSmtpConfigurationIsReportedForPasswordReset()
+    {
+        var sender = new SmtpUserEmailSender(new ConfigurationBuilder().Build());
+
+        EmailSendResult result = await sender.SendPasswordResetAsync(
+            "user@example.com",
+            "Test User",
+            "a-generated-password",
+            CancellationToken.None);
+
+        Assert.Equal(EmailSendResult.NotConfigured, result);
+    }
+
+    [Fact]
     public async Task EventQuotaEmailUsesExistingSmtpConfiguration()
     {
         var sender = new SmtpUserEmailSender(new ConfigurationBuilder().Build());

@@ -14,6 +14,10 @@ export function ProfilePage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [success, setSuccess] = useState('');
 
@@ -55,6 +59,36 @@ export function ProfilePage() {
     }
   }
 
+  async function submitPassword(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setSuccess('');
+    if (newPassword !== confirmPassword) {
+      setError(new Error('Новый пароль и подтверждение не совпадают.'));
+      return;
+    }
+
+    setPasswordBusy(true);
+    try {
+      await api<{ sessionsRevoked: boolean }>('/api/users/me/password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setSuccess('Пароль изменён. Выполняется выход из учетной записи.');
+      window.setTimeout(() => {
+        setSession(null);
+        navigate('/login', { replace: true });
+      }, 1200);
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setPasswordBusy(false);
+    }
+  }
+
   if (loading) return <Loading />;
   return (
     <>
@@ -69,6 +103,16 @@ export function ProfilePage() {
           <div className="profile-meta"><span>Роль</span><strong>{profile?.role === 'Administrator' ? 'Администратор' : 'Пользователь'}</strong></div>
           <div className="form-actions"><Button type="submit" disabled={busy}>{busy ? 'Сохраняем…' : 'Сохранить профиль'}</Button></div>
         </form>
+        <div className="password-section">
+          <h2>Смена пароля</h2>
+          <p className="helper-text">После смены пароля потребуется войти снова.</p>
+          <form className="form-stack" onSubmit={submitPassword}>
+            <label className="field"><span>Текущий пароль</span><input type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
+            <label className="field"><span>Новый пароль</span><input type="password" autoComplete="new-password" required minLength={6} maxLength={1024} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /><small>Не менее 6 символов.</small></label>
+            <label className="field"><span>Повторите новый пароль</span><input type="password" autoComplete="new-password" required minLength={6} maxLength={1024} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+            <div className="form-actions"><Button type="submit" disabled={passwordBusy}>{passwordBusy ? 'Меняем пароль…' : 'Сменить пароль'}</Button></div>
+          </form>
+        </div>
       </section>
     </>
   );
