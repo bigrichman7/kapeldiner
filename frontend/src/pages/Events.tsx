@@ -236,6 +236,7 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
   const [statusNotificationAction, setStatusNotificationAction] = useState<'publish' | 'cancel' | null>(null);
   const [ticketOptionsVisible, setTicketOptionsVisible] = useState(false);
   const [ticketBusy, setTicketBusy] = useState<'download' | 'email' | null>(null);
+  const navigate = useNavigate();
 
   async function load() {
     setLoading(true);
@@ -441,6 +442,22 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
     }
   }
 
+  async function deleteEvent() {
+    if (!window.confirm(
+      'Удалить это мероприятие? Вся связанная с мероприятием информация о бронировании будет безвозвратно удалена.',
+    )) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/admin/events/${eventId}`, { method: 'DELETE' });
+      navigate('/admin/events');
+    } catch (reason) {
+      setError(reason);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function reloadAdminData() {
     await load();
   }
@@ -463,6 +480,7 @@ export function EventDetailPage({ mode }: { mode: Mode }) {
           {!['completed', 'cancelled'].includes(event.status) && <Link className="button button-secondary" to={`/admin/events/${eventId}/edit`}>Изменить</Link>}
           {event.status === 'draft' && <Button disabled={busy} onClick={() => void changeStatus('publish')}>Опубликовать</Button>}
           {['draft', 'published'].includes(event.status) && <Button variant="danger" disabled={busy} onClick={() => void changeStatus('cancel')}>Отменить</Button>}
+          {event.status !== 'published' && <Button variant="danger" disabled={busy} onClick={() => void deleteEvent()}>Удалить</Button>}
         </div>
       ) : <Link className="text-link back-link" to="/events">← Все мероприятия</Link>}
     >
