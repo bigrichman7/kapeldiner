@@ -93,10 +93,14 @@ public sealed class SmtpUserEmailSender(IConfiguration configuration) : IUserEma
     {
         string eventDate = startAt.ToString("dd.MM.yyyy 'в' HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
         string subjectTitle = eventTitle.Replace('\r', ' ').Replace('\n', ' ');
+        string? publicBaseUrl = configuration["PublicBaseUrl"];
+        string siteLink = string.IsNullOrWhiteSpace(publicBaseUrl)
+            ? string.Empty
+            : $"Забронировать места можно на сайте: {publicBaseUrl.TrimEnd('/')}\n\n";
         string body = $"Здравствуйте, {name}!\n\n"
             + $"Опубликовано новое мероприятие «{eventTitle}», которое состоится {eventDate} (время московское).\n"
             + $"Для вас выделено мест: {availableSeats}.\n\n"
-            + "Забронировать места можно на сайте: https://kapeldiner.org\n\n"
+            + siteLink
             + "С уважением,\nКапельдинер";
 
         return SendAsync(email, $"Новое мероприятие «{subjectTitle}» — ваша квота", body, cancellationToken);

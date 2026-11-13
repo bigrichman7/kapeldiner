@@ -1,14 +1,19 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using KapeldinerService.Web.Auth;
 
 namespace KapeldinerService.Tests.Api;
 
-public sealed class TestControllerTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class TestControllerTests : IClassFixture<TestControllerApiFactory>
 {
     private readonly HttpClient _client;
 
-    public TestControllerTests(WebApplicationFactory<Program> factory)
+    public TestControllerTests(TestControllerApiFactory factory)
     {
         _client = factory.CreateClient();
     }
@@ -24,4 +29,20 @@ public sealed class TestControllerTests : IClassFixture<WebApplicationFactory<Pr
     }
 
     private sealed record TestResponse(string Message);
+}
+
+public sealed class TestControllerApiFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.ConfigureTestServices(services =>
+        {
+            ServiceDescriptor? adminBootstrapper = services.FirstOrDefault(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService)
+                && Equals(descriptor.ImplementationType, typeof(AdminBootstrapper)));
+            if (adminBootstrapper is not null)
+                services.Remove(adminBootstrapper);
+        });
+        builder.UseEnvironment("Development");
+    }
 }

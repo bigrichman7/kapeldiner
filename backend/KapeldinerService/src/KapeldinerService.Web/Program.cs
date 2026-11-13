@@ -30,6 +30,19 @@ builder.Services.AddHostedService<EventCompletionBackgroundService>();
 builder.Services.AddHostedService<AdminBootstrapper>();
 
 bool isProduction = builder.Environment.IsProduction();
+string? publicBaseUrl = builder.Configuration["PublicBaseUrl"];
+if (isProduction
+    && (!Uri.TryCreate(publicBaseUrl, UriKind.Absolute, out Uri? publicBaseUri)
+        || !string.Equals(publicBaseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+        || string.IsNullOrWhiteSpace(publicBaseUri.Host)
+        || !string.Equals(publicBaseUri.AbsolutePath, "/", StringComparison.Ordinal)
+        || !string.IsNullOrEmpty(publicBaseUri.Query)
+        || !string.IsNullOrEmpty(publicBaseUri.Fragment)
+        || !string.IsNullOrEmpty(publicBaseUri.UserInfo)))
+{
+    throw new InvalidOperationException("Production requires PublicBaseUrl to be an HTTPS origin without a URL path.");
+}
+
 string authCookieName = isProduction ? "__Host-Kapeldiner.Session" : "Kapeldiner.Session";
 CookieSecurePolicy securePolicy = isProduction ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
 

@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using KapeldinerService.Web.Events;
+using KapeldinerService.Web.Auth;
 
 namespace KapeldinerService.Tests.Api;
 
@@ -138,6 +139,7 @@ public sealed class AuthenticationApiFactory : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        builder.UseEnvironment("Development");
         builder.ConfigureTestServices(services =>
         {
             ServiceDescriptor? completionWorker = services.FirstOrDefault(descriptor =>
@@ -145,6 +147,12 @@ public sealed class AuthenticationApiFactory : WebApplicationFactory<Program>
                 && descriptor.ImplementationType == typeof(EventCompletionBackgroundService));
             if (completionWorker is not null)
                 services.Remove(completionWorker);
+
+            ServiceDescriptor? adminBootstrapper = services.FirstOrDefault(descriptor =>
+                descriptor.ServiceType == typeof(IHostedService)
+                && Equals(descriptor.ImplementationType, typeof(AdminBootstrapper)));
+            if (adminBootstrapper is not null)
+                services.Remove(adminBootstrapper);
 
             services.AddAuthentication(options =>
                 {

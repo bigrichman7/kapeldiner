@@ -20,6 +20,11 @@ demo accounts or mock API responses.
    Vite proxies `/api` to the local HTTPS API. The proxy is development-only;
    this does not change production API hosting or authentication.
 
+For production, build and serve the frontend with the instructions in the
+[backend deployment runbook](../backend/README.md#production-deployment). The
+deployed web server serves the SPA and proxies `/api` on the same origin; the
+frontend uses relative API URLs and needs no host-specific build setting.
+
 The first administrator must already be bootstrapped as described in the
 backend runbook. User creation uses the existing email flow: the API must have
 SMTP configured to deliver a generated password, otherwise it returns an

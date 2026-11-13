@@ -1,11 +1,65 @@
 # Backend runbook and API
 
 This guide describes the current implementation in `KapeldinerService`; it is
-not a replacement for product requirements. QR/electronic tickets are not
-implemented. See [Authentication](../docs/authentication.md) for session,
+not a replacement for product requirements. See [Authentication](../docs/authentication.md) for session,
 CSRF, cookie, and administrator-bootstrap details and
 [the product specification](../docs/product-spec.md) for the confirmed hall
 and MVP requirements.
+
+## Production deployment
+
+The production Compose setup builds the frontend and API containers and runs
+PostgreSQL on a private Docker network. The frontend and `/api` share one
+origin, so browser sessions and CSRF cookies work without CORS configuration.
+Only the frontend port is published on the server.
+
+The application requires HTTPS in production because its authentication
+cookies are `Secure`. Terminate TLS at a reverse proxy on the same server and
+forward HTTPS traffic to the Compose frontend port (8080 by default), bound to
+loopback. Configure that proxy to preserve the incoming `Host` header. If the
+TLS ingress runs on another host, set `HTTP_BIND_ADDRESS=0.0.0.0` and firewall
+the frontend port so only that ingress can reach it. Do not expose the API or
+PostgreSQL ports publicly.
+
+1. Copy `.env.example` to `.env`, set `PUBLIC_BASE_URL` to the HTTPS origin
+   users will open (including a trailing slash), and set a random database
+   password. For example, `openssl rand -hex 32` generates a value safe to put
+   in the env file. Restrict access to `.env`; it contains production secrets.
+   The production administrator login and password are required only on the
+   first startup, and the password must be at least 12 characters. SMTP is
+   optional; when configured, the API requires SMTP STARTTLS.
+2. Build the images and start PostgreSQL:
+
+   ```sh
+   docker compose -f compose.production.yml build
+   docker compose -f compose.production.yml up -d postgres
+   ```
+
+3. Apply database migrations with the bundle included in the API image, then
+   start the API and frontend:
+
+   ```sh
+   docker compose -f compose.production.yml run --rm api ./efbundle
+   docker compose -f compose.production.yml up -d
+   ```
+
+   The migration command uses the same database configuration as the API
+   service. The first successful API startup creates the configured
+   administrator if none exists; then remove `ADMIN_LOGIN` and `ADMIN_PASSWORD`
+   from `.env` and recreate the API container with
+   `docker compose -f compose.production.yml up -d --force-recreate api`.
+   Keep both named volumes (`postgres-data` and `data-protection-keys`) when
+   upgrading or recreating containers. Back up PostgreSQL and the data
+   protection key volume; losing the latter invalidates existing sessions.
+4. Verify the public `/api/health` endpoint and open the site over HTTPS. Ticket
+   QR links and event email links use `PUBLIC_BASE_URL`; an incorrect origin
+   sends users to the wrong host. The site and API are not configured for
+   hosting under a URL subpath.
+
+For ongoing schema updates, build the new API image, run `./efbundle` once
+against the existing database, and then recreate the API/frontend services.
+Do not use `docker compose down -v` on a server: it deletes the database and
+data-protection volumes.
 
 ## Run locally
 
@@ -42,9 +96,10 @@ repository root. No production credentials or tracked settings are required.
    ```
 
    Docker Compose reads the same root `.env`; the port exposed on the host is
-   `POSTGRES_PORT` (5435 above). User Secrets override the connection string
-   from `appsettings.json`. Never put a real deployment connection string or
-   production credential in `.env`, tracked settings, or examples.
+   `POSTGRES_PORT` (5435 above). User Secrets provide the connection string;
+   the tracked settings intentionally contain no database credentials. Never
+   put a real deployment connection string or production credential in tracked
+   settings or examples.
 
 3. Install the EF CLI if it is not already available, restore dependencies, and
    apply all pending PostgreSQL migrations:
@@ -125,9 +180,8 @@ HTTPS Development API at `https://localhost:7282`; see the
 [frontend guide](../frontend/README.md) for frontend checks and account notes.
 Ticket QR codes in Development point to `http://localhost:5173/ticket/{token}`,
 where the frontend serves the public verification page. For deployments, set
-`Tickets:PublicBaseUrl` to the public frontend origin (for example,
-`https://tickets.example.org`) so generated ticket links do not point to the
-API host.
+`PublicBaseUrl` to the public HTTPS origin so ticket QR codes and event email
+links resolve to the deployed frontend.
 
 ### Optional email delivery
 
@@ -135,7 +189,7 @@ Creating an account through `POST /api/admin/users` sends a generated
 permanent password by SMTP. Publishing a draft event sends a notification to
 each user with a positive quota; the message includes the event title, Moscow
 start time, allocated places, and the placeholder booking site
-`https://kapeldiner.org`. Cancelling a draft or published event also notifies
+the configured `PublicBaseUrl`. Cancelling a draft or published event also notifies
 each user with a positive quota and includes the event details and allocated
 places. Both event responses report failed deliveries, but email failures do
 not undo publication or cancellation. A published event cannot be published
